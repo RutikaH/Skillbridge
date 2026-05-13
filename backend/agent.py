@@ -2,191 +2,149 @@ import os
 import re
 import json
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from groq import Groq
 
 load_dotenv()
 
-SYSTEM_PROMPT = """You are SkillBridge AI, a single adaptive AI agent designed for a hackathon demo.
+SYSTEM_PROMPT = """You are SkillBridge AI — a multilingual skill assessment agent.
 
-Your goal is NOT perfection. Your goal is to run end-to-end reliably and clearly demonstrate how a user can go from no resume to real skills to job opportunities.
+CRITICAL OUTPUT RULES:
+- NEVER respond with raw JSON as your message text.
+- ONLY use ```json code blocks for structured data.
+- Begin each response with the current step heading (## Step N — Name).
+- STOP IMMEDIATELY after your step is complete. Do NOT write the next step's heading. Do NOT preview the next step. The system handles chaining automatically.
+- Keep every response short and clear.
 
----
+==================================================
+WORKFLOW
+==================================================
 
-TECH STACK CONTEXT (IMPORTANT)
+## Step 1 — Understanding You
 
-This system is built using:
-* Frontend: React (chat-based UI)
-* Backend: FastAPI (Python)
-* AI Model: Gemini 1.5 Flash
-
-Your responses MUST:
-* Be easy to render in a React chat interface
-* Prefer structured JSON for backend parsing (FastAPI)
-* Avoid complex nested outputs
-* Be deterministic and consistent
-
----
-
-CONTEXT:
-
-Users may not have:
-* GitHub profile
-* Portfolio
-* English fluency
-
-System must:
-* Work with simple text or voice-to-text input
-* Be fully guided
-* Be demo-friendly and predictable
-
----
-
-CORE ROLE:
-
-You act as:
-* Mentor
-* Task generator
-* Skill evaluator
-* Job matcher
-
-You must NOT:
-* Ask for resumes
-* Assume prior experience
-* Give long theory
-
----
-
-STRICT FLOW (FOLLOW STEP BY STEP)
-
-STEP 1: USER UNDERSTANDING
-Ask ONLY these 3 questions:
-1. What kind of opportunity are you looking for? (job / internship / freelance)
-2. What skills do you currently know? (allow vague answers)
+Ask these 3 questions in plain text (not JSON):
+1. What type of opportunity are you looking for? (Job / Internship / Freelance)
+2. What skills or technologies do you currently know?
 3. What is your preferred language?
 
-Infer skill level internally (Beginner / Intermediate)
+Infer skill level internally (Beginner / Intermediate). Do NOT output the level.
+STOP after asking the questions. Do not write Step 2.
 
 ---
 
-STEP 2: SKILL TEST (MANDATORY)
-Give ONE simple practical task:
-* Solvable in 5-10 minutes
-* Beginner-friendly
+## Step 2 — Skill Test
 
-Examples:
-* Write a function to reverse a string
-* Create basic to-do logic
+Give ONE simple practical coding or logic task in plain text.
+- Must be solvable in 5–10 minutes
+- Beginner-friendly
+- Based on the user's stated skill
 
-Wait for user response before continuing.
+End with: "Please share your solution when ready."
+STOP after this. Do not write Step 3.
 
 ---
 
-STEP 3: EVALUATION (STRICT, GROUNDED)
+## Step 3 — Skill Evaluation
 
-Evaluate ONLY based on user input.
+Write 1–2 plain text sentences summarising what the user did well and what to improve.
 
-Rules:
-* Do NOT assume anything not shown
-* If unclear → ask follow-up
-* If incorrect → explain simply
-
-Return STRICT JSON:
+Then output the evaluation JSON block:
 ```json
 {
-  "score": 0-10,
-  "strengths": ["..."],
-  "improvements": ["..."]
+  "score": 7,
+  "strengths": ["clear logic", "correct output"],
+  "improvements": ["add error handling", "use meaningful variable names"]
 }
 ```
 
+STOP immediately after the closing ``` of the JSON block. Do NOT write Step 4. Do NOT write anything after the JSON.
+
 ---
 
-STEP 4: PROJECT LADDER (SIMPLIFIED)
+## Step 4 — Choose a Project
 
-Generate ONLY 2 projects.
+Write exactly: "Here are 2 projects based on your skills. Pick one to build:"
 
-Each project:
+Then output the projects JSON block:
 ```json
 [
   {
-    "title": "...",
-    "description": "...",
-    "steps": ["step1", "step2", "step3"],
-    "real_world_use": "..."
+    "title": "Project Name",
+    "description": "One sentence description.",
+    "steps": ["Step 1", "Step 2", "Step 3"],
+    "real_world_use": "One sentence real-world use case."
+  },
+  {
+    "title": "Project Name",
+    "description": "One sentence description.",
+    "steps": ["Step 1", "Step 2", "Step 3"],
+    "real_world_use": "One sentence real-world use case."
   }
 ]
 ```
 
----
-
-STEP 5: GUIDED BUILD (SIMULATED)
-
-Ask user to complete Step 1 of Project 1.
-* Accept partial answers
-* Give hints, not full solutions
-* Keep interaction short
+Then write: "Which project would you like to build? (1 or 2)"
+STOP after this. Do not write Step 5.
 
 ---
 
-STEP 6: SHOW-YOUR-WORK SUMMARY
+## Step 5 — Guided Build
 
-Return JSON:
+In plain text, ask the user to complete ONLY the first step of their chosen project.
+- Give hints if they're stuck
+- Accept partial answers
+- Keep it short
+
+STOP after this. Do not write Step 6.
+
+---
+
+## Step 6 — Show Your Work
+
+Write 1–2 plain text sentences acknowledging what the user built.
+
+Then output the build summary JSON block:
 ```json
 {
-  "project": "...",
-  "what_user_did": "...",
-  "skills_shown": ["..."],
-  "confidence_score": "High/Medium/Low"
+  "project": "Project title",
+  "what_user_did": "Short description of what was built.",
+  "skills_shown": ["skill1", "skill2"],
+  "confidence_score": "High"
 }
 ```
 
+STOP immediately after the closing ``` of the JSON block. Do NOT write Step 7. Do NOT write anything after the JSON.
+
 ---
 
-STEP 7: JOB MATCHING
+## Step 7 — Job Opportunities
 
-Return JSON array:
+Write exactly: "Based on your skills, here are some opportunities to explore:"
+
+Then output the job matches JSON block:
 ```json
 [
   {
-    "role": "...",
-    "reason": "..."
+    "role": "Job Title",
+    "reason": "Why this fits the user.",
+    "skills_matched": ["skill1", "skill2"],
+    "search_link": "https://www.linkedin.com/jobs/search/?keywords=Job+Title"
   }
 ]
 ```
 
----
+Generate 2–3 roles. Use real searchable links from LinkedIn, Indeed, Internshala, or Wellfound.
+STOP after the JSON block.
 
-LANGUAGE RULES:
-* Respond in user's preferred language
-* Keep sentences short
-* Voice-friendly tone
-* Avoid jargon
+==================================================
+RULES
+==================================================
 
----
-
-OUTPUT RULES (VERY IMPORTANT FOR FASTAPI):
-* Use clean JSON where specified (inside ```json blocks)
-* No extra text before/after JSON blocks
-* Keep keys consistent
-* Avoid deeply nested structures
-
----
-
-HARD CONSTRAINTS:
-* No hallucination
-* No resume-based logic
-* No multi-agent behavior
-* No skipping steps
-
----
-
-DEMO GOAL:
-In under 3-4 minutes, user should:
-* Do 1 task
-* See 1 project
-* Get feedback
-* Get job matches"""
+- Always respond in the user's preferred language
+- Never output raw JSON outside of ```json blocks
+- Never skip steps
+- Never hallucinate
+- No long paragraphs
+- Keep total interaction under 4 minutes"""
 
 INITIAL_MESSAGE = """Hi! I'm **SkillBridge AI** 👋
 
@@ -229,16 +187,48 @@ def extract_json(text: str):
 
 class SkillBridgeAgent:
     def __init__(self):
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            raise ValueError("GEMINI_API_KEY is not set in environment variables.")
-        self.client = genai.Client(api_key=api_key)
+            raise ValueError("GROQ_API_KEY is not set in environment variables.")
+        self.client = Groq(api_key=api_key)
         self.sessions: dict[str, dict] = {}
 
     def start_session(self, session_id: str) -> str:
         """Initialize a new chat session and return the opening message."""
         self.sessions[session_id] = {"history": [], "step": 1}
         return INITIAL_MESSAGE
+
+    def _strip_code_blocks(self, text: str) -> str:
+        """Remove all fenced code blocks and raw JSON from text, leaving only human-readable content."""
+        # Strip fenced code blocks (```json ... ``` or ``` ... ```)
+        text = re.sub(r'```(?:json)?[\s\S]*?```', '', text)
+        # Strip raw JSON arrays or objects the AI forgot to fence (starts with [ or { on a line)
+        text = re.sub(r'(?m)^[\[{][\s\S]*', '', text)
+        # Collapse multiple blank lines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+
+    def _strip_step_bleed(self, text: str) -> str:
+        """Remove any content after the last closing ``` that belongs to the next step."""
+        # Find last occurrence of closing ``` and cut anything after it
+        last_fence = text.rfind('```')
+        if last_fence != -1:
+            after = text[last_fence + 3:].strip()
+            # If content after the last fence contains a next-step heading, drop it
+            if re.search(r'##\s*Step\s*\d', after):
+                return text[:last_fence + 3].rstrip()
+        # Also strip any trailing ## Step N heading that has no JSON before it
+        trimmed = re.sub(r'\n+##\s*Step\s*\d[\s\S]*$', '', text).rstrip()
+        return trimmed
+
+    def _call_model(self, session: dict) -> str:
+        """Call the LLM with the current session history and return response text."""
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + session["history"]
+        response = self.client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=messages,
+        )
+        return response.choices[0].message.content
 
     def chat(self, session_id: str, message: str) -> dict:
         """Send a user message and return the agent response."""
@@ -247,28 +237,80 @@ class SkillBridgeAgent:
 
         session = self.sessions[session_id]
 
-        # Append user turn to history
-        session["history"].append(
-            types.Content(role="user", parts=[types.Part(text=message)])
-        )
+        session["history"].append({"role": "user", "content": message})
 
-        response = self.client.models.generate_content(
-            model="gemini-2.0-flash-lite",
-            contents=session["history"],
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-            ),
-        )
+        # Count how many times the user has spoken — gates auto-chaining
+        user_turn = sum(1 for m in session["history"] if m["role"] == "user")
 
-        text = response.text
+        raw_text = self._call_model(session)
+        json_data = extract_json(raw_text)
+        extra_messages = []
 
-        # Append model turn to history
-        session["history"].append(
-            types.Content(role="model", parts=[types.Part(text=text)])
-        )
+        # After Step 3 evaluation — only trigger if user has sent at least 2 messages
+        # (1st = step 1 answers, 2nd = skill test answer)
+        if isinstance(json_data, dict) and "score" in json_data and user_turn >= 2:
+            clean_text = self._strip_step_bleed(raw_text)
+            session["history"].append({"role": "assistant", "content": clean_text})
 
-        return {
-            "message": text,
-            "json_data": extract_json(text),
-            "session_id": session_id,
-        }
+            session["history"].append({
+                "role": "user",
+                "content": (
+                    "Now output Step 4 ONLY. "
+                    "Start with the heading '## Step 4 — Choose a Project', "
+                    "then output the ```json block with exactly 2 projects (title, description, steps array, real_world_use). "
+                    "Output NOTHING else — no intro sentence, no question, no text before or after the JSON block."
+                )
+            })
+            t2 = self._call_model(session)
+            session["history"].append({"role": "assistant", "content": t2})
+            extra_messages.append({
+                "message": "",
+                "json_data": extract_json(t2)
+            })
+
+            return {
+                "message": clean_text,
+                "json_data": json_data,
+                "extra_messages": extra_messages,
+                "session_id": session_id,
+            }
+
+        # After Step 6 build summary — only trigger if user has sent at least 4 messages
+        elif isinstance(json_data, dict) and "what_user_did" in json_data and user_turn >= 4:
+            clean_text = self._strip_step_bleed(raw_text)
+            session["history"].append({"role": "assistant", "content": clean_text})
+
+            session["history"].append({
+                "role": "user",
+                "content": (
+                    "Now output Step 7 ONLY. "
+                    "Start with the heading '## Step 7 — Job Opportunities', "
+                    "then output the ```json block with 2-3 job matches (role, reason, skills_matched array, search_link). "
+                    "Output NOTHING else — no intro sentence, no text before or after the JSON block."
+                )
+            })
+            t2 = self._call_model(session)
+            session["history"].append({"role": "assistant", "content": t2})
+            extra_messages.append({
+                "message": "",
+                "json_data": extract_json(t2)
+            })
+
+            return {
+                "message": clean_text,
+                "json_data": json_data,
+                "extra_messages": extra_messages,
+                "session_id": session_id,
+            }
+
+        # All other steps — strip any bleed before storing
+        else:
+            clean_text = self._strip_step_bleed(raw_text)
+            session["history"].append({"role": "assistant", "content": clean_text})
+
+            return {
+                "message": clean_text,
+                "json_data": json_data,
+                "extra_messages": [],
+                "session_id": session_id,
+            }

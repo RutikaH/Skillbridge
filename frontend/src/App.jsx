@@ -1,7 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ChatBubble from './components/ChatBubble'
 
-const API_BASE = ''  // proxied via Vite to http://localhost:8000
+const API_BASE = '' // proxied via Vite to http://localhost:8000
+
+// Simple UUID generator
+function uuidv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
 
 export default function App() {
   const [messages, setMessages] = useState([])
@@ -12,30 +21,21 @@ export default function App() {
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
-  // Auto-scroll on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
-  // Start session on mount
   useEffect(() => {
-    const init = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/start`, { method: 'POST' })
-        const data = await res.json()
-        setSessionId(data.session_id)
-        setMessages([{ role: 'ai', content: data.message, jsonData: null }])
-      } catch {
-        setMessages([{
-          role: 'ai',
-          content: '⚠️ Could not connect to SkillBridge backend.\n\nMake sure the FastAPI server is running on **port 8000**.\n\n```\ncd backend\nuvicorn main:app --reload\n```',
-          jsonData: null,
-        }])
-      } finally {
-        setInitializing(false)
-      }
-    }
-    init()
+    setSessionId(uuidv4())
+    setMessages([
+      {
+        role: 'ai',
+        content:
+          "Hi! I'm SkillBridge AI 👋\n\nI'll help you go from zero to job-ready — no resume needed!\n\nLet's start with 3 quick questions:\n\n1. What kind of opportunity are you looking for? (Job / Internship / Freelance)\n2. What skills do you currently know? (Vague is fine)\n3. What is your preferred language?",
+        jsonData: null,
+      },
+    ])
+    setInitializing(false)
   }, [])
 
   const sendMessage = useCallback(async () => {
@@ -43,7 +43,7 @@ export default function App() {
     if (!text || loading || !sessionId) return
 
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: text, jsonData: null }])
+    setMessages((prev) => [...prev, { role: 'user', content: text, jsonData: null }])
     setLoading(true)
 
     try {
@@ -54,17 +54,20 @@ export default function App() {
       })
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
       const data = await res.json()
-      setMessages(prev => [...prev, {
-        role: 'ai',
-        content: data.message,
-        jsonData: data.json_data ?? null,
-      }])
+      const newMessages = [
+        { role: 'ai', content: data.message, jsonData: data.json_data ?? null },
+      ]
+      if (data.extra_messages?.length > 0) {
+        for (const m of data.extra_messages) {
+          newMessages.push({ role: 'ai', content: m.message, jsonData: m.json_data ?? null })
+        }
+      }
+      setMessages((prev) => [...prev, ...newMessages])
     } catch (err) {
-      setMessages(prev => [...prev, {
-        role: 'ai',
-        content: `❌ Error: ${err.message}. Please try again.`,
-        jsonData: null,
-      }])
+      setMessages((prev) => [
+        ...prev,
+        { role: 'ai', content: `❌ Error: ${err.message}. Please try again.`, jsonData: null },
+      ])
     } finally {
       setLoading(false)
       setTimeout(() => inputRef.current?.focus(), 0)
@@ -78,25 +81,25 @@ export default function App() {
     }
   }
 
-  const resetSession = async () => {
+  const resetSession = () => {
     setInitializing(true)
     setMessages([])
     setInput('')
-    try {
-      const res = await fetch(`${API_BASE}/start`, { method: 'POST' })
-      const data = await res.json()
-      setSessionId(data.session_id)
-      setMessages([{ role: 'ai', content: data.message, jsonData: null }])
-    } catch {
-      setMessages([{ role: 'ai', content: '⚠️ Could not restart. Check backend.', jsonData: null }])
-    } finally {
-      setInitializing(false)
-    }
+    const id = uuidv4()
+    setSessionId(id)
+    setMessages([
+      {
+        role: 'ai',
+        content:
+          "Hi! I'm SkillBridge AI 👋\n\nI'll help you go from zero to job-ready — no resume needed!\n\nLet's start with 3 quick questions:\n\n1. What kind of opportunity are you looking for? (Job / Internship / Freelance)\n2. What skills do you currently know? (Vague is fine)\n3. What is your preferred language?",
+        jsonData: null,
+      },
+    ])
+    setInitializing(false)
   }
 
   return (
     <div className="app">
-      {/* Header */}
       <header className="header">
         <div className="header-left">
           <span className="logo">🎓</span>
@@ -110,7 +113,6 @@ export default function App() {
         </button>
       </header>
 
-      {/* Chat window */}
       <main className="chat-window">
         {initializing && (
           <div className="init-loader">
@@ -118,34 +120,34 @@ export default function App() {
             <span>Starting SkillBridge AI...</span>
           </div>
         )}
+
         {messages.map((msg, i) => (
           <ChatBubble key={i} message={msg} />
         ))}
+
         {loading && (
           <div className="bubble ai-bubble loading-bubble">
-            <span className="dot" /><span className="dot" /><span className="dot" />
+            <span className="dot" />
+            <span className="dot" />
+            <span className="dot" />
           </div>
         )}
+
         <div ref={bottomRef} />
       </main>
 
-      {/* Input bar */}
       <footer className="input-bar">
         <textarea
           ref={inputRef}
           className="chat-input"
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type your answer and press Enter…"
           disabled={loading || initializing}
           rows={1}
         />
-        <button
-          className="send-btn"
-          onClick={sendMessage}
-          disabled={loading || !input.trim() || initializing}
-        >
+        <button className="send-btn" onClick={sendMessage} disabled={loading || !input.trim() || initializing}>
           Send
         </button>
       </footer>

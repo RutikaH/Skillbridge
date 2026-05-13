@@ -19,12 +19,18 @@ function parseInline(text) {
   })
 }
 
-function renderText(text) {
+function renderText(text, stripAllCodeBlocks = false) {
   // Remove JSON code blocks from visible text — they're rendered as cards
-  const clean = text
-    .replace(/```json[\s\S]*?```/g, '')
-    .replace(/```[\s\S]*?```/g, (match) => match) // keep non-json code blocks
-    .trim()
+  let clean = text.replace(/```json[\s\S]*?```/g, '')
+
+  if (stripAllCodeBlocks) {
+    // Also strip plain ``` blocks when a card already displays the data
+    clean = clean.replace(/```[\s\S]*?```/g, '')
+  } else {
+    clean = clean.replace(/```[\s\S]*?```/g, (match) => match) // keep non-json code blocks
+  }
+
+  clean = clean.trim()
 
   if (!clean) return null
 
@@ -34,6 +40,27 @@ function renderText(text) {
 
   while (i < lines.length) {
     const line = lines[i]
+
+    // Heading: ## Step N — Title
+    if (/^##\s/.test(line)) {
+      elements.push(<h3 key={`h3-${i}`} className="step-heading">{line.replace(/^##\s/, '')}</h3>)
+      i++
+      continue
+    }
+
+    // Heading: # Title
+    if (/^#\s/.test(line)) {
+      elements.push(<h2 key={`h2-${i}`} className="step-heading">{line.replace(/^#\s/, '')}</h2>)
+      i++
+      continue
+    }
+
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      elements.push(<hr key={`hr-${i}`} className="step-divider" />)
+      i++
+      continue
+    }
 
     // Fenced non-JSON code block
     if (line.startsWith('```')) {
@@ -104,9 +131,11 @@ export default function ChatBubble({ message, loading }) {
           </div>
         ) : (
           <>
-            <div className={`bubble ${isAI ? 'ai-bubble' : 'user-bubble'}`}>
-              {renderText(message.content)}
-            </div>
+            {message.content?.trim() && (
+              <div className={`bubble ${isAI ? 'ai-bubble' : 'user-bubble'}`}>
+                {renderText(message.content, isAI && !!message.jsonData)}
+              </div>
+            )}
             {isAI && message.jsonData && <JsonCard data={message.jsonData} />}
           </>
         )}

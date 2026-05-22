@@ -445,6 +445,32 @@ body {
 .chat-input:focus { border-color: var(--primary); }
 .chat-input:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.language-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.language-dropdown {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: white;
+  cursor: pointer;
+}
+.mic-btn {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  background: #f0f0f0;
+  font-size: 18px;
+}
+
+.mic-btn:hover {
+  background: #ddd;
+}
+
 .send-btn {
   background: var(--primary);
   color: #fff;

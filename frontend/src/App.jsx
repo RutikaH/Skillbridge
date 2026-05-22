@@ -13,6 +13,8 @@ function uuidv4() {
 }
 
 export default function App() {
+  const [listening, setListening] = useState(false);
+  const [language, setLanguage] = useState("English");
   const [messages, setMessages] = useState([])
   const [sessionId, setSessionId] = useState(null)
   const [input, setInput] = useState('')
@@ -22,22 +24,89 @@ export default function App() {
   const inputRef = useRef(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
 
-  useEffect(() => {
-    setSessionId(uuidv4())
-    setMessages([
-      {
-        role: 'ai',
-        content:
-          "Hi! I'm SkillBridge AI 👋\n\nI'll help you go from zero to job-ready — no resume needed!\n\nLet's start with 3 quick questions:\n\n1. What kind of opportunity are you looking for? (Job / Internship / Freelance)\n2. What skills do you currently know? (Vague is fine)\n3. What is your preferred language?",
-        jsonData: null,
-      },
-    ])
-    setInitializing(false)
-  }, [])
+  const startSession = async () => {
 
+    try {
+
+      setInitializing(true);
+
+      const res = await fetch(
+        `${API_BASE}/start?language=${language}`,
+        {
+          method: 'POST',
+        }
+      );
+
+      const data = await res.json();
+
+      setSessionId(data.session_id);
+
+      setMessages([
+        {
+          role: 'ai',
+          content: data.message,
+          jsonData: null,
+        },
+      ]);
+
+    } catch (err) {
+
+      console.error(err);
+
+    } finally {
+
+      setInitializing(false);
+
+    }
+  };
+
+  startSession();
+
+}, [language]);
+  const startVoiceInput = () => {
+
+    if (!("webkitSpeechRecognition" in window)) {
+      alert("Speech recognition not supported in this browser");
+      return;
+    }
+
+    const recognition = new window.webkitSpeechRecognition();
+
+        // MULTILINGUAL SUPPORT
+
+    const languageMap = {
+      English: "en-US",
+      Hindi: "hi-IN",
+      Telugu: "te-IN",
+      Tamil: "ta-IN",
+      Spanish: "es-ES"
+    };
+
+    recognition.lang = languageMap[language] || "en-US";
+
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    setListening(true);
+
+    recognition.start();
+
+    recognition.onresult = (event) => {
+
+      const transcript = event.results[0][0].transcript;
+
+        setInput(transcript);
+      };
+
+    recognition.onerror = (event) => {
+      console.error(event.error);
+      };
+
+    recognition.onend = () => {
+        setListening(false);
+      };
+    };
   const sendMessage = useCallback(async () => {
     const text = input.trim()
     if (!text || loading || !sessionId) return
@@ -50,7 +119,7 @@ export default function App() {
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, message: text }),
+        body: JSON.stringify({ session_id: sessionId, message: text ,language: language}),
       })
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
       const data = await res.json()
@@ -81,25 +150,49 @@ export default function App() {
     }
   }
 
-  const resetSession = () => {
-    setInitializing(true)
-    setMessages([])
-    setInput('')
-    const id = uuidv4()
-    setSessionId(id)
+  const resetSession = async () => {
+
+  try {
+
+    setInitializing(true);
+
+    setMessages([]);
+
+    setInput('');
+
+    const res = await fetch(
+      `${API_BASE}/start?language=${language}`,
+      {
+        method: 'POST',
+      }
+    );
+
+    const data = await res.json();
+
+    setSessionId(data.session_id);
+
     setMessages([
       {
         role: 'ai',
-        content:
-          "Hi! I'm SkillBridge AI 👋\n\nI'll help you go from zero to job-ready — no resume needed!\n\nLet's start with 3 quick questions:\n\n1. What kind of opportunity are you looking for? (Job / Internship / Freelance)\n2. What skills do you currently know? (Vague is fine)\n3. What is your preferred language?",
+        content: data.message,
         jsonData: null,
       },
-    ])
-    setInitializing(false)
+    ]);
+
+  } catch (err) {
+
+    console.error(err);
+
+  } finally {
+
+    setInitializing(false);
+
   }
+}
 
   return (
     <div className="app">
+      
       <header className="header">
         <div className="header-left">
           <span className="logo">🎓</span>
@@ -108,6 +201,7 @@ export default function App() {
             <p>From zero to job-ready</p>
           </div>
         </div>
+        
         <button className="btn-reset" onClick={resetSession} title="Start over">
           ↺ New Session
         </button>
@@ -147,6 +241,13 @@ export default function App() {
           disabled={loading || initializing}
           rows={1}
         />
+        <button
+          className="mic-btn"
+          onClick={startVoiceInput}
+          disabled={loading || initializing}
+        >
+          {listening ? "🎙️ Listening..." : "🎤"}
+        </button>
         <button className="send-btn" onClick={sendMessage} disabled={loading || !input.trim() || initializing}>
           Send
         </button>

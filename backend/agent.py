@@ -1,10 +1,11 @@
 import os
 import re
 import json
-from dotenv import load_dotenv
-from groq import Groq
+import time
+from llm_router import ModelRouter
 
-load_dotenv()
+
+
 
 SYSTEM_PROMPT = """You are SkillBridge AI — a multilingual skill assessment agent.
 
@@ -25,6 +26,15 @@ Ask these 3 questions in plain text (not JSON):
 1. What type of opportunity are you looking for? (Job / Internship / Freelance)
 2. What skills or technologies do you currently know?
 3. What is your preferred language?
+IMPORTANT:
+
+- If the user answers all 3 questions in a single message,
+DO NOT ask Step 1 again.
+- Immediately continue to Step 2.
+- Accept short answers like:
+"job, python, telugu"
+- Infer missing formatting automatically.
+- Never repeat Step 1 if answers are already provided.
 
 Infer skill level internally (Beginner / Intermediate). Do NOT output the level.
 STOP after asking the questions. Do not write Step 2.
@@ -139,7 +149,9 @@ STOP after the JSON block.
 RULES
 ==================================================
 
-- Always respond in the user's preferred language
+- Always respond ONLY in the user's preferred language
+- Maintain the same language throughout the conversation
+- If the user changes language, adapt automatically
 - Never output raw JSON outside of ```json blocks
 - Never skip steps
 - Never hallucinate
@@ -187,16 +199,13 @@ def extract_json(text: str):
 
 class SkillBridgeAgent:
     def __init__(self):
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError("GROQ_API_KEY is not set in environment variables.")
-        self.client = Groq(api_key=api_key)
+
         self.sessions: dict[str, dict] = {}
 
     def start_session(self, session_id: str) -> str:
         """Initialize a new chat session and return the opening message."""
-        self.sessions[session_id] = {"history": [], "step": 1}
-        return INITIAL_MESSAGE
+        self.sessions[session_id] = {"history": [], "step": 1, "language": "English"}
+        return self._call_model(self.sessions[session_id])
 
     def _strip_code_blocks(self, text: str) -> str:
         """Remove all fenced code blocks and raw JSON from text, leaving only human-readable content."""
@@ -223,12 +232,29 @@ class SkillBridgeAgent:
 
     def _call_model(self, session: dict) -> str:
         """Call the LLM with the current session history and return response text."""
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + session["history"]
-        response = self.client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=messages,
-        )
-        return response.choices[0].message.content
+        language_instruction = f"""
+        The user's preferred language is:
+        {session['language']}
+        Respond ONLY in this language.Never reply in English unless the selected language is English.Never translate back to English.
+        Never mix English unless unavoidable technical words.
+        All headings, explanations, evaluations, and project steps MUST use this language.
+        """
+
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT + "\n\n" + language_instruction
+            }
+        ] + session["history"]
+
+        start_time = time.time()
+        response = ModelRouter.generate(messages)
+        latency = time.time() - start_time
+
+        print(f"\nProvider Used: {response['provider']}")
+        print(f"Latency: {latency:.2f}s\n")
+
+        return response["content"]
 
     def chat(self, session_id: str, message: str) -> dict:
         """Send a user message and return the agent response."""
@@ -236,6 +262,22 @@ class SkillBridgeAgent:
             self.start_session(session_id)
 
         session = self.sessions[session_id]
+        lower_msg = message.lower()
+
+        if any(word in lower_msg for word in ["hindi", "हिंदी"]):
+            session["language"] = "Hindi"
+
+        elif any(word in lower_msg for word in ["telugu", "తెలుగు"]):
+            session["language"] = "Telugu"
+
+        elif any(word in lower_msg for word in ["tamil", "தமிழ்"]):
+            session["language"] = "Tamil"
+
+        elif any(word in lower_msg for word in ["spanish", "español"]):
+            session["language"] = "Spanish"
+
+        elif any(word in lower_msg for word in ["english"]):
+            session["language"] = "English"
 
         session["history"].append({"role": "user", "content": message})
 
@@ -255,7 +297,13 @@ class SkillBridgeAgent:
             session["history"].append({
                 "role": "user",
                 "content": (
-                    "Now output Step 4 ONLY. "
+                    f"""
+                    The user's selected language is:
+                    {session['language']}
+
+                    Output Step 4 ONLY in this language.
+                    Do NOT switch to English.
+                    """
                     "Start with the heading '## Step 4 — Choose a Project', "
                     "then output the ```json block with exactly 2 projects (title, description, steps array, real_world_use). "
                     "Output NOTHING else — no intro sentence, no question, no text before or after the JSON block."
@@ -283,7 +331,13 @@ class SkillBridgeAgent:
             session["history"].append({
                 "role": "user",
                 "content": (
-                    "Now output Step 7 ONLY. "
+                    f"""
+                    The user's selected language is:
+                    {session['language']}
+
+                    Output Step 7 ONLY in this language.
+                    Do NOT switch to English.
+                    """
                     "Start with the heading '## Step 7 — Job Opportunities', "
                     "then output the ```json block with 2-3 job matches (role, reason, skills_matched array, search_link). "
                     "Output NOTHING else — no intro sentence, no text before or after the JSON block."

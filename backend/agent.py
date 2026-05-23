@@ -3,9 +3,7 @@ import re
 import json
 import time
 from llm_router import ModelRouter
-
-
-
+from db import sessions_collection
 
 SYSTEM_PROMPT = """You are SkillBridge AI — a multilingual skill assessment agent.
 
@@ -198,14 +196,35 @@ def extract_json(text: str):
 
 
 class SkillBridgeAgent:
-    def __init__(self):
+    # def __init__(self):
 
-        self.sessions: dict[str, dict] = {}
+    #     self.sessions: dict[str, dict] = {}
 
-    def start_session(self, session_id: str) -> str:
-        """Initialize a new chat session and return the opening message."""
-        self.sessions[session_id] = {"history": [], "step": 1, "language": "English"}
-        return self._call_model(self.sessions[session_id])
+    def start_session(self, session_id: str):
+
+        session_data = {
+            "session_id": session_id,
+            "history": [],
+            "step": 1,
+            "language": "English"
+        }
+
+        # sessions_collection.insert_one(session_data)
+        sessions_collection.update_one(
+            {"session_id": session_id},
+            {
+                "$setOnInsert": session_data
+            },
+            upsert=True
+        )
+
+        return INITIAL_MESSAGE
+
+    # def start_session(self, session_id: str) -> str:
+    #     """Initialize a new chat session and return the opening message."""
+    #     self.sessions[session_id] = {
+    #         "history": [], "step": 1, "language": "English"}
+    #     return self._call_model(self.sessions[session_id])
 
     def _strip_code_blocks(self, text: str) -> str:
         """Remove all fenced code blocks and raw JSON from text, leaving only human-readable content."""
@@ -258,10 +277,20 @@ class SkillBridgeAgent:
 
     def chat(self, session_id: str, message: str) -> dict:
         """Send a user message and return the agent response."""
-        if session_id not in self.sessions:
+        # if session_id not in self.sessions:
+        #     self.start_session(session_id)
+
+        # session = self.sessions[session_id]
+        session = sessions_collection.find_one(
+            {"session_id": session_id}
+        )
+
+        if not session:
             self.start_session(session_id)
 
-        session = self.sessions[session_id]
+            session = sessions_collection.find_one(
+                {"session_id": session_id}
+            )
         lower_msg = message.lower()
 
         if any(word in lower_msg for word in ["hindi", "हिंदी"]):
@@ -278,8 +307,24 @@ class SkillBridgeAgent:
 
         elif any(word in lower_msg for word in ["english"]):
             session["language"] = "English"
+        sessions_collection.update_one(
+            {"session_id": session_id},
+            {
+                "$set": {
+                    "language": session["language"]
+                }
+            }
+        )
 
         session["history"].append({"role": "user", "content": message})
+        sessions_collection.update_one(
+            {"session_id": session_id},
+            {
+                "$set": {
+                    "history": session["history"]
+                }
+            }
+        )
 
         # Count how many times the user has spoken — gates auto-chaining
         user_turn = sum(1 for m in session["history"] if m["role"] == "user")
@@ -292,8 +337,16 @@ class SkillBridgeAgent:
         # (1st = step 1 answers, 2nd = skill test answer)
         if isinstance(json_data, dict) and "score" in json_data and user_turn >= 2:
             clean_text = self._strip_step_bleed(raw_text)
-            session["history"].append({"role": "assistant", "content": clean_text})
-
+            session["history"].append(
+                {"role": "assistant", "content": clean_text})
+            sessions_collection.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "history": session["history"]
+                    }
+                }
+            )
             session["history"].append({
                 "role": "user",
                 "content": (
@@ -309,13 +362,32 @@ class SkillBridgeAgent:
                     "Output NOTHING else — no intro sentence, no question, no text before or after the JSON block."
                 )
             })
+            sessions_collection.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "history": session["history"]
+                    }
+                }
+            )
+
             t2 = self._call_model(session)
             session["history"].append({"role": "assistant", "content": t2})
+            projects_data = extract_json(t2)
             extra_messages.append({
                 "message": "",
-                "json_data": extract_json(t2)
+                "json_data": projects_data
             })
-
+            sessions_collection.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "projects": projects_data,
+                        "evaluation": json_data,
+                        "step": 4
+                    }
+                }
+            )
             return {
                 "message": clean_text,
                 "json_data": json_data,
@@ -326,7 +398,17 @@ class SkillBridgeAgent:
         # After Step 6 build summary — only trigger if user has sent at least 4 messages
         elif isinstance(json_data, dict) and "what_user_did" in json_data and user_turn >= 4:
             clean_text = self._strip_step_bleed(raw_text)
-            session["history"].append({"role": "assistant", "content": clean_text})
+            session["history"].append(
+                {"role": "assistant", "content": clean_text})
+            sessions_collection.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "build_summary": json_data,
+                        "step": 6
+                    }
+                }
+            )
 
             session["history"].append({
                 "role": "user",
@@ -343,12 +425,31 @@ class SkillBridgeAgent:
                     "Output NOTHING else — no intro sentence, no text before or after the JSON block."
                 )
             })
+            sessions_collection.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "history": session["history"]
+                    }
+                }
+            )
             t2 = self._call_model(session)
             session["history"].append({"role": "assistant", "content": t2})
+            jobs_data = extract_json(t2)
             extra_messages.append({
                 "message": "",
-                "json_data": extract_json(t2)
+                "json_data": jobs_data
             })
+
+            sessions_collection.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "job_matches": jobs_data,
+                        "step": 7
+                    }
+                }
+            )
 
             return {
                 "message": clean_text,
@@ -358,9 +459,39 @@ class SkillBridgeAgent:
             }
 
         # All other steps — strip any bleed before storing
+#         else:
+#             clean_text = self._strip_step_bleed(raw_text)
+#             session["history"].append(
+#                 {"role": "assistant", "content": clean_text})
+# sessions_collection.update_one(
+#     {"session_id": session_id},
+#     {
+#         "$set": {
+#             "history": session["history"]
+#         }
+#     }
+# )
+#             return {
+#                 "message": clean_text,
+#                 "json_data": json_data,
+#                 "extra_messages": [],
+#                 "session_id": session_id,
+#             }
         else:
             clean_text = self._strip_step_bleed(raw_text)
-            session["history"].append({"role": "assistant", "content": clean_text})
+
+            session["history"].append(
+                {"role": "assistant", "content": clean_text}
+            )
+
+            sessions_collection.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "history": session["history"]
+                    }
+                }
+            )
 
             return {
                 "message": clean_text,

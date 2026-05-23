@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
 from agent import SkillBridgeAgent
-from db import db
 
 app = FastAPI(title="SkillBridge AI", version="1.0.0")
 
@@ -29,7 +28,7 @@ def start_session():
     """Create a new session and return the opening message."""
     session_id = str(uuid.uuid4())
     message = agent.start_session(session_id)
-   # agent.sessions[session_id]["language"] = language = "English"
+    agent.sessions[session_id]["language"] = language="English"
     return {"session_id": session_id, "message": message}
 
 
@@ -37,8 +36,8 @@ def start_session():
 def chat(req: ChatRequest):
     """Send a message and receive a response from SkillBridge AI."""
     try:
-        # if req.session_id in agent.sessions:
-        #     agent.sessions[req.session_id]["language"] = req.language
+        if req.session_id in agent.sessions:
+           agent.sessions[req.session_id]["language"] = req.language
         result = agent.chat(req.session_id, req.message)
         return result
     except Exception as e:

@@ -4,3 +4,9 @@ openai
 groq
 python-dotenv
 pydantic
+sqlalchemy
+passlib
+argon2-cffi
+python-jose[cryptography]
+httpx
+email-validator

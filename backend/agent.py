@@ -48,6 +48,9 @@ Give ONE simple practical coding or logic task in plain text.
 - Beginner-friendly
 - Based on the user's stated skill
 
+If the user says they are stuck or don't know how to start, give a short hint and do not move to Step 3 yet.
+Only proceed to Step 3 after the user submits a concrete solution or an attempt.
+
 End with: "Please share your solution when ready."
 STOP after this. Do not write Step 3.
 
@@ -230,6 +233,78 @@ class SkillBridgeAgent:
         trimmed = re.sub(r'\n+##\s*Step\s*\d[\s\S]*$', '', text).rstrip()
         return trimmed
 
+    def _get_step_from_text(self, text: str) -> int | None:
+        """Detect the current step number from the assistant response."""
+        match = re.search(r'##\s*Step\s*(\d+)', text)
+        if match:
+            return int(match.group(1))
+        return None
+
+    def _user_provided_attempt(self, text: str) -> bool:
+        """Return True if the user message contains a concrete attempt/value rather than a stuck response."""
+        normalized = text.lower()
+
+        stuck_patterns = [
+            r"don't know",
+            r"dont know",
+            r"no idea",
+            r"not sure",
+            r"i'm stuck",
+            r"im stuck",
+            r"stuck",
+            r"help",
+            r"can't start",
+            r"cannot start",
+            r"no code",
+            r"no solution",
+            r"no project",
+            r"nothing",
+            r"later",
+            r"skip",
+        ]
+
+        for pattern in stuck_patterns:
+            if re.search(pattern, normalized):
+                return False
+
+        code_signals = [
+            r'```',
+            r'\bclass\b',
+            r'\bdef\b',
+            r'\breturn\b',
+            r'\bfor\b',
+            r'\bwhile\b',
+            r'\bfunction\b',
+            r'\bconsole\.log\b',
+            r'\bSystem\.out\b',
+            r'\bprintln\b',
+            r'\bnew\s+\w+',
+            r'\barray\b',
+            r'\[\s*\]',
+            r'\{\s*\}',
+            r';',
+        ]
+
+        for pattern in code_signals:
+            if re.search(pattern, text):
+                return True
+
+        attempt_signals = [
+            r'\bsolution\b',
+            r'\bcode\b',
+            r'\bproject\b',
+            r'\banswer\b',
+            r'\battempt\b',
+            r'\bimplement\b',
+            r'\bbuild\b',
+            r'\bcreate\b',
+        ]
+
+        if any(re.search(pattern, normalized) for pattern in attempt_signals) and len(normalized.split()) > 6:
+            return True
+
+        return False
+
     def _call_model(self, session: dict) -> str:
         """Call the LLM with the current session history and return response text."""
         language_instruction = f"""
@@ -286,11 +361,38 @@ class SkillBridgeAgent:
 
         raw_text = self._call_model(session)
         json_data = extract_json(raw_text)
+        current_step = self._get_step_from_text(raw_text)
+        if current_step is not None:
+            session["step"] = current_step
         extra_messages = []
 
-        # After Step 3 evaluation — only trigger if user has sent at least 2 messages
-        # (1st = step 1 answers, 2nd = skill test answer)
-        if isinstance(json_data, dict) and "score" in json_data and user_turn >= 2:
+        # If the user has not provided a concrete solution or attempt, do not show Step 3 evaluation.
+        user_attempt = self._user_provided_attempt(message)
+        if session.get("step") == 3 and isinstance(json_data, dict) and "score" in json_data and user_turn >= 2 and not user_attempt:
+            session["step"] = 2
+            hint_prompt = {
+                "role": "user",
+                "content": (
+                    f"""
+                    The user has not provided a concrete code solution or attempt.
+                    Stay in Step 2 and give a short hint to help them get started on the task.
+                    Do NOT output Step 3 evaluation, score, or JSON.
+                    """
+                )
+            }
+            session["history"].append({"role": "assistant", "content": self._strip_step_bleed(raw_text)})
+            session["history"].append(hint_prompt)
+            retry_text = self._call_model(session)
+            session["history"].append({"role": "assistant", "content": retry_text})
+            return {
+                "message": retry_text,
+                "json_data": None,
+                "extra_messages": [],
+                "session_id": session_id,
+            }
+
+        # After Step 3 evaluation — only trigger if the assistant actually completed Step 3
+        if session.get("step") == 3 and isinstance(json_data, dict) and "score" in json_data and user_turn >= 2:
             clean_text = self._strip_step_bleed(raw_text)
             session["history"].append({"role": "assistant", "content": clean_text})
 

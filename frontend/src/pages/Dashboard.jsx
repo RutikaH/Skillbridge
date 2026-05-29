@@ -1,377 +1,325 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import ChatBubble from '../components/ChatBubble'
-import { fetchWithAuth, getProfile, logout } from '../services/authService'
+import { getProfile } from '../services/authService'
 
-const languages = ['English', 'Hindi', 'Telugu', 'Tamil', 'Spanish']
+const skillsMock = [
+  { name: 'Python', score: 82, level: 'Advanced' },
+  { name: 'React', score: 68, level: 'Intermediate' },
+  { name: 'SQL', score: 61, level: 'Intermediate' },
+]
 
-export default function Dashboard() {
-  const navigate = useNavigate()
+const activityMock = [
+  { title: 'Assessment submitted', detail: 'Skill Test — Python', date: 'Today' },
+  { title: 'Evaluation completed', detail: 'Verified score posted to your profile', date: 'Yesterday' },
+  { title: 'New skill unlocked', detail: 'React — Intermediate level', date: '2 days ago' },
+]
 
-  const [user, setUser] = useState(null)
-  const [messages, setMessages] = useState([])
-  const [sessionId, setSessionId] = useState(null)
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [initializing, setInitializing] = useState(true)
-  const [language, setLanguage] = useState('English')
-  const [error, setError] = useState('')
-  const [listening, setListening] = useState(false)
+const opportunitiesMock = [
+  {
+    role: 'Frontend Intern',
+    company: 'NovaWorks',
+    type: 'Internship',
+    location: 'Bengaluru',
+    requiredSkills: 'React, JavaScript',
+    matchPct: 86,
+    description: 'Build UI features and collaborate with the design + engineering teams.',
+  },
+  {
+    role: 'Data Analyst (Entry)',
+    company: 'Pulse Analytics',
+    type: 'Job',
+    location: 'Remote',
+    requiredSkills: 'SQL, Python',
+    matchPct: 79,
+    description: 'Turn raw data into actionable insights and dashboards.',
+  },
+]
 
-  const bottomRef = useRef(null)
-  const inputRef = useRef(null)
-
-  useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        const profile = await getProfile()
-        setUser(profile)
-      } catch {
-        navigate('/login')
-      }
-    }
-
-    loadProfile()
-  }, [navigate])
-
-  useEffect(() => {
-    const startSession = async () => {
-      try {
-        setInitializing(true)
-
-        const data = await fetchWithAuth(
-          `/start?language=${encodeURIComponent(language)}`,
-          {
-            method: 'POST',
-          }
-        )
-
-        setSessionId(data.session_id)
-
-        setMessages([
-          {
-            role: 'ai',
-            content: data.message,
-            jsonData: null,
-          },
-        ])
-      } catch (err) {
-        setError(err.message)
-      } finally {
-        setInitializing(false)
-      }
-    }
-
-    startSession()
-  }, [language])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: 'smooth',
-    })
-  }, [messages, loading, initializing])
-
-  const sendMessage = useCallback(async () => {
-    const text = input.trim()
-
-    if (!text || loading || !sessionId) return
-
-    setInput('')
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: 'user',
-        content: text,
-        jsonData: null,
-      },
-    ])
-
-    setLoading(true)
-    setError('')
-
-    try {
-      const data = await fetchWithAuth('/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          session_id: sessionId,
-          message: text,
-          language,
-        }),
-      })
-
-      const newMessages = [
-        {
-          role: 'ai',
-          content: data.message,
-          jsonData: data.json_data ?? null,
-        },
-      ]
-
-      if (data.extra_messages?.length) {
-        data.extra_messages.forEach((m) => {
-          newMessages.push({
-            role: 'ai',
-            content: m.message,
-            jsonData: m.json_data ?? null,
-          })
-        })
-      }
-
-      setMessages((prev) => [...prev, ...newMessages])
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'ai',
-          content: `❌ Error: ${err.message}. Please try again.`,
-          jsonData: null,
-        },
-      ])
-    } finally {
-      setLoading(false)
-
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 0)
-    }
-  }, [input, loading, sessionId, language])
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
+function levelToProgress(level) {
+  switch (level) {
+    case 'Beginner':
+      return 18
+    case 'Intermediate':
+      return 45
+    case 'Advanced':
+      return 72
+    case 'Expert':
+      return 92
+    default:
+      return 35
   }
-  const startVoiceInput = () => {
+}
 
-    if (!("webkitSpeechRecognition" in window)) {
-      alert("Speech recognition not supported in this browser")
-      return
-    }
+function initials(name) {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return 'S'
+  const first = parts[0]?.[0] || 'S'
+  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] : ''
+  return (first + last).toUpperCase()
+}
 
-    const recognition = new window.webkitSpeechRecognition()
-
-    const languageMap = {
-      English: "en-US",
-      Hindi: "hi-IN",
-      Telugu: "te-IN",
-      Tamil: "ta-IN",
-      Spanish: "es-ES"
-    }
-
-    recognition.lang = languageMap[language] || "en-US"
-
-    recognition.continuous = false
-    recognition.interimResults = false
-
-    setListening(true)
-
-    recognition.start()
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript
-      setInput(transcript)
-    }
-
-    recognition.onerror = (event) => {
-      console.error(event.error)
-    }
-
-    recognition.onend = () => {
-      setListening(false)
-    }
-  }
-
-  const resetSession = async () => {
-    try {
-      setInitializing(true)
-      setMessages([])
-      setInput('')
-
-      const data = await fetchWithAuth(
-        `/start?language=${encodeURIComponent(language)}`,
-        {
-          method: 'POST',
-        }
-      )
-
-      setSessionId(data.session_id)
-
-      setMessages([
-        {
-          role: 'ai',
-          content: data.message,
-          jsonData: null,
-        },
-      ])
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setInitializing(false)
-    }
-  }
-
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
-
+function StatCard({ icon, label, value, sublabel }) {
   return (
-    <div className="dashboard-shell">
-
-      {/* Floating Top Right User */}
-      <div className="floating-user-profile">
-
-        <div className="user-avatar-small">
-          {user?.name?.charAt(0) ?? 'U'}
+    <div className="kpi-card" role="group" aria-label={label}>
+      <div className="kpi-top">
+        <div className="kpi-icon" aria-hidden>
+          {icon}
         </div>
-
-        <span className="floating-user-name">
-          {user?.name ?? 'User'}
-        </span>
-
+        <div className="kpi-label">{label}</div>
       </div>
+      <div className="kpi-value">{value}</div>
+      {sublabel ? <div className="kpi-sub">{sublabel}</div> : null}
+    </div>
+  )
+}
 
-      <div className="dashboard-container">
+function ProgressBar({ value }) {
+  return (
+    <div className="progress" aria-label={`Progress ${value}%`}>
+      <div className="progress-fill" style={{ width: `${value}%` }} />
+    </div>
+  )
+}
 
-        {/* Top Header */}
-        <div className="dashboard-top">
-
-          <div>
-            <div className="dashboard-title">
-              SkillBridge AI
-            </div>
-
-            <div className="dashboard-subtitle">
-              From zero to job-ready
-            </div>
-          </div>
-
-          <div className="dashboard-actions">
-
-            <div className="credentials-group">
-
-              <select
-                className="top-language-selector"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-              >
-                {languages.map((lang) => (
-                  <option key={lang} value={lang}>
-                    {lang}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                className="logout-button"
-                onClick={handleLogout}
-              >
-                Logout
-              </button>
-
-            </div>
-
-            <button
-              className="secondary-button"
-              onClick={resetSession}
-              disabled={initializing || loading}
-            >
-              ↻ New Session
-            </button>
-
-          </div>
+function SkillProgressCard({ name, score, level }) {
+  return (
+    <div className="card skill-card" role="group" aria-label={`Skill ${name}`}>
+      <div className="skill-head">
+        <div>
+          <div className="skill-name">{name}</div>
+          <div className="skill-level">{level}</div>
         </div>
-
-        {/* Main Layout */}
-        <div className="dashboard-main no-sidebar">
-
-          {/* Center Chat */}
-          <div className="center-column">
-
-            <div className="chat-card">
-
-              {/* Chat Window */}
-              <div className="chat-window">
-
-                {initializing && (
-                  <div className="init-loader">
-                    <div className="spinner" />
-                    <span>Initializing your chat...</span>
-                  </div>
-                )}
-
-                {error && (
-                  <div className="field-error panel-error">
-                    {error}
-                  </div>
-                )}
-
-                {messages.map((msg, i) => (
-                  <ChatBubble
-                    key={i}
-                    message={msg}
-                  />
-                ))}
-
-                {loading && (
-                  <div className="bubble ai-bubble loading-bubble">
-                    <span className="dot" />
-                    <span className="dot" />
-                    <span className="dot" />
-                  </div>
-                )}
-
-                <div ref={bottomRef} />
-
-              </div>
-
-              {/* Footer Input */}
-              <div className="card-footer">
-
-                <div className="input-bar">
-
-                  <textarea
-                    ref={inputRef}
-                    className="chat-input"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Type your message and press Enter..."
-                    disabled={loading || initializing}
-                    rows={1}
-                  />
-                  <button
-                    className="mic-btn"
-                    onClick={startVoiceInput}
-                    disabled={loading || initializing}
-                  >
-                    {listening ? "🎙️ " : "🎤"}
-                  </button>
-                  <button
-                    className="send-btn"
-                    onClick={sendMessage}
-                    disabled={
-                      loading ||
-                      !input.trim() ||
-                      initializing
-                    }
-                  >
-                    Send
-                  </button>
-
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-
+        <div className="skill-score">
+          {score}
+          <span className="skill-score-suffix">%</span>
         </div>
-
+      </div>
+      <div className="skill-progress">
+        <ProgressBar value={levelToProgress(level)} />
+        <div className="skill-meta">
+          <span>Beginner</span>
+          <span>Intermediate</span>
+          <span>Advanced</span>
+          <span>Expert</span>
+        </div>
       </div>
     </div>
   )
 }
+
+function ActivityItem({ title, detail, date }) {
+  return (
+    <div className="activity-item">
+      <div className="activity-dot" aria-hidden />
+      <div className="activity-content">
+        <div className="activity-title">{title}</div>
+        <div className="activity-detail">{detail}</div>
+        <div className="activity-date">{date}</div>
+      </div>
+    </div>
+  )
+}
+
+function OpportunityCard({ role, company, location, requiredSkills, matchPct, description }) {
+  return (
+    <div className="card opp-card" role="group" aria-label={`Opportunity ${role}`}>
+      <div className="opp-top">
+        <div>
+          <div className="opp-role">{role}</div>
+          <div className="opp-company">
+            {company} · {location}
+          </div>
+        </div>
+        <div className="match-pill" title="Match percentage">
+          {matchPct}%
+          <span className="match-pill-sub"> match</span>
+        </div>
+      </div>
+      <div className="opp-desc">{description}</div>
+      <div className="opp-skills">
+        <span className="opp-skills-label">Required:</span> {requiredSkills}
+      </div>
+      <div className="opp-actions">
+        <button className="btn btn-primary" type="button">
+          Apply
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export default function Dashboard() {
+  const navigate = useNavigate()
+
+  const [profile, setProfile] = useState(null)
+  const [loadingProfile, setLoadingProfile] = useState(true)
+  const [profileError, setProfileError] = useState('')
+
+  const userName = useMemo(() => profile?.name, [profile])
+  const avatarInitials = useMemo(() => initials(userName), [userName])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      try {
+        setLoadingProfile(true)
+        setProfileError('')
+        const p = await getProfile()
+        if (!cancelled) setProfile(p)
+      } catch (e) {
+        if (!cancelled) setProfileError(e?.message || 'Unable to load profile')
+      } finally {
+        if (!cancelled) setLoadingProfile(false)
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const welcomeLine = loadingProfile
+    ? 'Welcome back…'
+    : userName
+      ? `Welcome back, ${userName} 👋`
+      : 'Welcome back 👋'
+
+  const kpis = useMemo(
+    () => [
+      { icon: '✅', label: 'Verified Skills', value: '3', sublabel: 'Ready to prove' },
+      { icon: '📈', label: 'Average Skill Score', value: '70%', sublabel: 'Across assessments' },
+      { icon: '🧪', label: 'Assessments Completed', value: '4', sublabel: 'Latest evaluated' },
+      { icon: '🎯', label: 'Opportunity Matches', value: '5', sublabel: 'Based on scores' },
+    ],
+    []
+  )
+
+  return (
+    <div className="page">
+      <div className="dash-hero">
+        <div className="dash-hero-left">
+          <div className="hero-badge">Skill-based hiring · Verified capabilities</div>
+          <h1 className="hero-title">{welcomeLine}</h1>
+          <p className="hero-subtitle">Get hired for your skills, not your degree.</p>
+
+          <div className="hero-progress-row" aria-label="Your progress summary">
+            <div className="hero-progress-item">
+              <div className="hero-progress-k">{kpis[0].value}</div>
+              <div className="hero-progress-l">Verified skills</div>
+            </div>
+            <div className="hero-progress-sep" aria-hidden />
+            <div className="hero-progress-item">
+              <div className="hero-progress-k">{kpis[2].value}</div>
+              <div className="hero-progress-l">Assessments completed</div>
+            </div>
+            <div className="hero-progress-sep" aria-hidden />
+            <div className="hero-progress-item">
+              <div className="hero-progress-k">{kpis[3].value}</div>
+              <div className="hero-progress-l">Opportunity matches</div>
+            </div>
+          </div>
+
+          {profileError ? <div className="field-error panel-error hero-error">{profileError}</div> : null}
+
+          <div className="hero-actions">
+            <button className="btn btn-primary" type="button" onClick={() => navigate('/assessments')}>
+              Start Assessment
+            </button>
+            <button className="btn btn-ghost" type="button" onClick={() => navigate('/opportunities')}>
+              View Opportunities
+            </button>
+          </div>
+
+          <div className="hero-mission">
+            <div className="mission-point">• Skill-based hiring</div>
+            <div className="mission-point">• Verified capabilities</div>
+            <div className="mission-point">• Inclusive opportunities</div>
+          </div>
+        </div>
+
+        <div className="dash-hero-right" aria-label="Profile quick card">
+          <div className="profile-quick">
+            <div className="profile-quick-avatar" aria-hidden>
+              {avatarInitials}
+            </div>
+            <div>
+              <div className="profile-quick-name">{userName || 'Candidate'}</div>
+              <div className="profile-quick-sub">Your verified score story</div>
+            </div>
+          </div>
+
+          <div className="kpi-grid">
+            {kpis.map((k) => (
+              <div key={k.label} className="kpi-grid-item">
+                <StatCard icon={k.icon} label={k.label} value={k.value} sublabel={k.sublabel} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title-row">
+          <div>
+            <div className="section-title">Skill Progress</div>
+            <div className="section-subtitle">Top verified skills with your current assessment momentum.</div>
+          </div>
+          <button className="btn btn-ghost" type="button" onClick={() => navigate('/skills')}>
+            Manage Skills
+          </button>
+        </div>
+
+        <div className="skills-grid">
+          {skillsMock.map((s) => (
+            <SkillProgressCard key={s.name} name={s.name} score={s.score} level={s.level} />
+          ))}
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title-row">
+          <div>
+            <div className="section-title">Recent Activity</div>
+            <div className="section-subtitle">Updates from your assessments and verified profile milestones.</div>
+          </div>
+        </div>
+
+        <div className="activity-list">
+          {activityMock.map((a) => (
+            <ActivityItem key={a.title + a.detail} title={a.title} detail={a.detail} date={a.date} />
+          ))}
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title-row">
+          <div>
+            <div className="section-title">Recommended Opportunities</div>
+            <div className="section-subtitle">Matches based on skills and verified scores.</div>
+          </div>
+          <button className="btn btn-ghost" type="button" onClick={() => navigate('/opportunities')}>
+            See all
+          </button>
+        </div>
+
+        <div className="opps-grid">
+          {opportunitiesMock.map((o) => (
+            <OpportunityCard
+              key={o.role + o.company}
+              role={o.role}
+              company={o.company}
+              location={o.location}
+              requiredSkills={o.requiredSkills}
+              matchPct={o.matchPct}
+              description={o.description}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+

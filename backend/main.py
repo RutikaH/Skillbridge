@@ -11,6 +11,7 @@ from routes import router as api_router
 from config import CORS_ORIGINS, JWT_SECRET_KEY
 from database import Base, engine, get_db
 from jwt_utils import get_current_user
+from llm_router import get_provider_info
 from models import User, Skill, Opportunity
 
 if not JWT_SECRET_KEY:
@@ -169,7 +170,16 @@ def chat(req: ChatRequest, current_user: User = Depends(get_current_user)):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Liveness probe.
+
+    Includes the currently active LLM provider so operators / monitoring
+    tools can confirm at runtime whether the service is running in
+    OpenAI-primary, Groq-only, OpenAI+Groq, or no-provider mode.
+    """
+    return {
+        "status": "ok",
+        "llm": get_provider_info(),
+    }
 
 
 app.include_router(auth_router)

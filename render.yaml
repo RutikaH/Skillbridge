@@ -16,6 +16,17 @@ services:
         value: "60"
 
       # ── LLM API keys (set manually) ──
+      # At least one of OPENAI_API_KEY / GROQ_API_KEY is required for the
+      # AI assessment to work. The application will start in every
+      # combination of these two keys. See backend/llm_router.py for
+      # provider selection logic.
+      #
+      # Cheapest / simplest deployment: leave OPENAI_API_KEY empty and
+      # set GROQ_API_KEY only. The service will run in "Groq-only" mode
+      # (Llama 3.1 8B Instant).
+      #
+      # If both are set, OpenAI (GPT-4o) is the primary provider and
+      # Groq is the automatic runtime fallback.
       - key: OPENAI_API_KEY
         sync: false
       - key: GROQ_API_KEY

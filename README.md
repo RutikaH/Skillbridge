@@ -5,7 +5,7 @@
 
 ## What it does
 
-A single AI agent (Gemini 1.5 Flash) guides a user through a strict 7-step flow:
+A single AI agent guides a user through a strict 7-step flow:
 
 | Step | What happens |
 |------|-------------|
@@ -21,13 +21,43 @@ A single AI agent (Gemini 1.5 Flash) guides a user through a strict 7-step flow:
 
 - **Frontend** — React 18 + Vite (chat UI)
 - **Backend** — FastAPI + Python
-- **AI** — Gemini-2.0-flash-lite (`google-generativeai`)
+- **AI** — OpenAI GPT-4o (primary) with Groq Llama 3.1 8B Instant (fallback).
+  The service can also run in **Groq-only** mode with no OpenAI dependency.
+
+## LLM provider modes
+
+The backend (`backend/llm_router.py`) picks a provider based on the
+environment variables you set:
+
+| `OPENAI_API_KEY` | `GROQ_API_KEY` | Behaviour |
+|------------------|----------------|-----------|
+| ✅ set           | ✅ set          | OpenAI (GPT-4o) is primary, Groq is the automatic runtime fallback |
+| ❌ empty         | ✅ set          | **Groq-only mode** — OpenAI is skipped entirely, Groq is the only provider |
+| ✅ set           | ❌ empty        | OpenAI only (no fallback — model calls will fail if OpenAI errors) |
+| ❌ empty         | ❌ empty        | App starts, but model calls return a clear runtime error |
+
+> **Cheapest / simplest deployment:** set `GROQ_API_KEY` only and leave
+> `OPENAI_API_KEY` empty. The app will start normally and run entirely
+> on Groq.
+
+Check which mode is active at runtime:
+
+```bash
+curl http://localhost:8000/health
+# { "status": "ok", "llm": { "openai_configured": false, "groq_configured": true, "active_provider": "Groq only" } }
+```
 
 ## Setup
 
-### 1. Clone & get a Gemini API key
+### 1. Get an LLM API key
 
-Get a free key at [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+Pick **one** of the two:
+
+- **Groq (recommended for low cost / free tier):** <https://console.groq.com/keys>
+- **OpenAI:** <https://platform.openai.com/api-keys>
+
+> If you supply **both** keys, OpenAI is used as the primary model and
+> Groq becomes the automatic fallback.
 
 ### 2. Backend
 
@@ -38,10 +68,22 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edit .env and paste your GEMINI_API_KEY
+# Edit .env and paste your GROQ_API_KEY (recommended) or OPENAI_API_KEY
+# For a Groq-only deployment, leave OPENAI_API_KEY empty.
 
 uvicorn main:app --reload
 # Runs on http://localhost:8000
+```
+
+On startup you should see a banner like:
+
+```
+================================================================
+[llm_router] LLM provider status
+[llm_router]   OPENAI_API_KEY: disabled
+[llm_router]   GROQ_API_KEY : ENABLED
+[llm_router]   Mode         : Groq only (no OpenAI dependency)
+================================================================
 ```
 
 ### 3. Frontend
@@ -60,7 +102,8 @@ Open [http://localhost:3000](http://localhost:3000) — done.
 ```
 SkillBridge/
 ├── backend/
-│   ├── agent.py          # SkillBridge AI agent (Gemini + session logic)
+│   ├── agent.py          # SkillBridge AI agent (7-step workflow)
+│   ├── llm_router.py     # LLM provider router (OpenAI + Groq, with Groq-only mode)
 │   ├── main.py           # FastAPI endpoints (/start, /chat, /health)
 │   ├── requirements.txt
 │   └── .env.example
@@ -81,7 +124,23 @@ SkillBridge/
 |--------|------|-------------|
 | POST | `/start` | Create session → returns `session_id` + opening message |
 | POST | `/chat` | `{ session_id, message }` → `{ message, json_data, session_id }` |
-| GET | `/health` | Health check |
+| GET | `/health` | Liveness + active LLM provider info |
+
+## Deployment (Render / Railway / Fly / etc.)
+
+The only **required** environment variables for the backend are:
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `JWT_SECRET_KEY` | **yes** | Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `DATABASE_URL` | recommended | Defaults to local SQLite if unset |
+| `CORS_ORIGINS` | recommended | Comma-separated list of allowed frontend origins |
+| `FRONTEND_URL` | recommended | Public URL of the frontend |
+| `GROQ_API_KEY` | **yes (for AI)** | Get a key at <https://console.groq.com/keys> |
+| `OPENAI_API_KEY` | optional | Leave empty for a Groq-only deployment |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | optional | Only if you want Google OAuth |
+
+See `render.yaml` for a working Render blueprint.
 
 ## Demo flow (3–4 min)
 

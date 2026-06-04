@@ -132,8 +132,13 @@ SkillBridge eliminates the resume-first hiring bottleneck. Instead of judging ca
 │    └── Auto-chains steps (e.g., Step 3 → Step 4)                │
 │                                                                  │
 │  llm_router.py (ModelRouter)                                     │
-│    ├── Primary: GPT-4o via OpenAI API                            │
-│    └── Fallback: Llama 3.1 8B via Groq API                       │
+│    ├── OpenAI (GPT-4o) used as primary when OPENAI_API_KEY set   │
+│    ├── Groq (Llama 3.1 8B Instant) used as runtime fallback      │
+│    ├── If only GROQ_API_KEY is set, Groq becomes the only        │
+│    │   provider (Groq-only mode) — OpenAI is never constructed   │
+│    └── Defensive lazy initialisation: clients are built only     │
+│        when their key is present; any build error is logged and  │
+│        the import chain never fails                              │
 │                                                                  │
 │  jwt_utils.py                                                    │
 │    ├── create_access_token() — JWT with email as subject         │
@@ -243,7 +248,7 @@ SkillBridge eliminates the resume-first hiring bottleneck. Instead of judging ca
 | `jwt_utils.py` | JWT token utilities | `create_access_token()` — JWT with `sub=email`, expiration. `decode_access_token()` — verify and extract email. `get_current_user()` — FastAPI dependency that extracts token, decodes, looks up user. Password hashing via argon2. |
 | `routes.py` | API router (`/api/*`) | 12 endpoints for dashboard, skills, assessments, activities, opportunities, profile, preferences, badges. All require `get_current_user` dependency. |
 | `agent.py` | AI assessment agent | `SkillBridgeAgent` class — manages sessions, 7-step workflow via system prompt, calls LLM, extracts JSON from responses, auto-chains steps, detects user attempts. |
-| `llm_router.py` | LLM provider routing | `ModelRouter.generate()` — tries GPT-4o first, falls back to Groq Llama 3.1 8B on failure. |
+| `llm_router.py` | LLM provider routing | `ModelRouter.generate()` — picks provider based on env vars: OpenAI (GPT-4o) primary with Groq (Llama 3.1 8B Instant) fallback, or Groq-only when `OPENAI_API_KEY` is unset. Defensive lazy init means the app starts with any combination of keys. |
 | `.env` | Environment secrets | API keys, database URL, JWT secret, Google OAuth credentials. |
 | `requirements.txt` | Python dependencies | fastapi, uvicorn, openai, groq, python-dotenv, pydantic, sqlalchemy, passlib, argon2-cffi, python-jose, httpx, email-validator. |
 
@@ -1068,7 +1073,7 @@ Frontend: Shows name, email, Python skill, assessment timeline with score 80, 3 
 1. **Clean separation of concerns**: Backend models/schemas/routes/auth are well-separated. Frontend pages/components/services are cleanly organized.
 2. **Pydantic validation**: All API inputs validated with Pydantic models (EmailStr, min_length, etc.)
 3. **SQLAlchemy ORM**: Proper relationships, foreign keys, cascade deletes
-4. **Dual LLM provider**: Automatic GPT-4o → Groq fallback for reliability
+4. **Dual LLM provider with Groq-only fallback**: Automatic GPT-4o → Groq fallback for reliability; the service can also run in Groq-only mode (no OpenAI dependency) when only `GROQ_API_KEY` is set.
 5. **Multi-step assessment**: Sophisticated 7-step workflow with auto-chaining and user attempt detection
 6. **Backend filtering**: Skills and opportunities support server-side search/filter/sort
 7. **Responsive chat UI**: Voice input, markdown rendering, JSON card visualization
@@ -1116,13 +1121,13 @@ Frontend: Shows name, email, Python skill, assessment timeline with score 80, 3 
 
 ### 30-Second Explanation
 
-"SkillBridge is an AI-powered skill assessment platform that replaces traditional resumes with verified skill scores. Users have a guided conversation with an AI chatbot that tests their coding abilities, evaluates their solutions, and generates verified skill scores. These scores are used to match users with relevant job and internship opportunities. The stack is React + FastAPI + SQLAlchemy + SQLite, with GPT-4o as the primary AI and Groq Llama as fallback."
+"SkillBridge is an AI-powered skill assessment platform that replaces traditional resumes with verified skill scores. Users have a guided conversation with an AI chatbot that tests their coding abilities, evaluates their solutions, and generates verified skill scores. These scores are used to match users with relevant job and internship opportunities. The stack is React + FastAPI + SQLAlchemy + SQLite, with GPT-4o as the primary AI and Groq Llama as fallback — and a Groq-only deployment mode that works without an OpenAI account."
 
 ### 2-Minute Explanation
 
 "SkillBridge solves the resume-first hiring problem by letting candidates prove their skills through AI assessment rather than listing credentials. The platform has three core systems:
 
-**First**, an AI assessment engine built as a 7-step conversational workflow. The chatbot asks about the user's skills, gives them a practical coding task, evaluates their solution with a scored assessment, then suggests projects and job opportunities. The entire assessment is powered by GPT-4o with automatic fallback to Groq's Llama model for reliability.
+**First**, an AI assessment engine built as a 7-step conversational workflow. The chatbot asks about the user's skills, gives them a practical coding task, evaluates their solution with a scored assessment, then suggests projects and job opportunities. The entire assessment is powered by GPT-4o with automatic fallback to Groq's Llama model for reliability, and can also run in a Groq-only mode when `OPENAI_API_KEY` is not set.
 
 **Second**, a verified skills system. When the AI evaluates a user's answer, the score is persisted to the database, creating verified skill records with levels (Beginner through Expert). These verified skills appear on the user's profile as a 'skill passport' — proof of capability that employers can trust.
 
@@ -1146,7 +1151,7 @@ The **most interesting technical challenge** was the AI assessment engine. It's 
 
 3. **JSON extraction**: The agent parses structured data (evaluations, project lists, job matches) from markdown code blocks in the LLM response, allowing the frontend to render rich JSON cards alongside the conversational text.
 
-4. **Dual-provider failover**: `ModelRouter` tries GPT-4o first, catches any exception, and falls back to Groq's Llama 3.1 8B model automatically. This ensures the assessment works even if OpenAI is down.
+4. **Dual-provider failover with Groq-only support**: `ModelRouter` tries GPT-4o first, catches any exception, and falls back to Groq's Llama 3.1 8B model automatically. When `OPENAI_API_KEY` is unset, the router uses Groq as the primary (and only) provider so the assessment works even on deployments without an OpenAI account.
 
 The **database schema** uses 8 tables with proper relationships. The key junction table is `user_skills` which links users to the master skills catalog and tracks verified scores and levels. When an assessment is saved, it creates an `assessment_result`, updates the `user_skill` record (or creates one), and logs an `activity` — all in a single transaction.
 

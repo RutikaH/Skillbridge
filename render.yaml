@@ -60,7 +60,12 @@ services:
     #   sizeGB: 1
 
   # ── Frontend (Static Site) ───────────────────────────
-  - type: static_site
+  # NOTE: The legacy `type: static_site` is NOT a valid service type in the
+  # current Render Blueprint spec. A static site must be declared as a
+  # `web` service with `runtime: static`.
+  # Reference: https://render.com/docs/blueprint-spec
+  - type: web
+    runtime: static
     name: skillbridge-frontend
     rootDir: frontend
     buildCommand: npm install --legacy-peer-deps && npm run build
@@ -69,6 +74,8 @@ services:
       # Set this to the backend URL from the service above
       - key: VITE_API_BASE_URL
         sync: false
+    # SPA rewrite: every unknown path falls back to index.html so React
+    # Router can handle client-side routes.
     routes:
       - type: rewrite
         from: /*

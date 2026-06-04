@@ -21,7 +21,7 @@ export default function Login() {
 
   useEffect(() => {
     const handler = (event) => {
-      const allowedOrigins = [window.location.origin, 'http://localhost:3000', 'http://127.0.0.1:3000']
+      const allowedOrigins = [window.location.origin]
       if (!allowedOrigins.includes(event.origin)) {
         return
       }

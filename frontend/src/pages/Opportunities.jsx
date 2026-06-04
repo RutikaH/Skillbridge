@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { getProfile } from '../services/authService'
-import { mockOpportunities } from '../data/mockOpportunities'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getOpportunities } from '../services/apiService'
 
 const typeOptions = ['All', 'Internship', 'Job']
 const locationOptions = ['All', 'Remote', 'Hybrid', 'Onsite']
@@ -10,11 +9,11 @@ function normalize(str) {
 }
 
 function skillMatchText(op) {
-  return [...op.requiredSkills].join(' ')
+  return [...(op.required_skills || [])].join(' ')
 }
 
 function getLocationBucket(location) {
-  const l = normalize(location)
+  const l = normalize(location || '')
   if (l.includes('remote')) return 'Remote'
   if (l.includes('hybrid')) return 'Hybrid'
   if (l.includes('onsite') || l.includes('on-site') || l.includes('on site')) return 'Onsite'
@@ -28,7 +27,7 @@ function scoreBucket(matchPct) {
 }
 
 function OpportunityCard({ opportunity }) {
-  const tone = scoreBucket(opportunity.matchPct)
+  const tone = scoreBucket(opportunity.match_pct)
 
   return (
     <div className="card opp-card" role="group" aria-label={opportunity.title}>
@@ -44,7 +43,7 @@ function OpportunityCard({ opportunity }) {
           </div>
         </div>
         <div className="match-pill" title="Match percentage">
-          {opportunity.matchPct}%
+          {opportunity.match_pct}%
           <span className="match-pill-sub"> match</span>
         </div>
       </div>
@@ -54,7 +53,7 @@ function OpportunityCard({ opportunity }) {
       <div className="opp-skills">
         <span className="opp-skills-label">Required:</span>
         <div className="tag-list">
-          {opportunity.requiredSkills.map((s) => (
+          {(opportunity.required_skills || []).map((s) => (
             <span key={s} className="tag tag-blue">
               {s}
             </span>
@@ -72,16 +71,16 @@ function OpportunityCard({ opportunity }) {
       </div>
 
       <div className="opp-foot">
-        Required score: <b>{opportunity.requiredScore}%</b>
+        Required score: <b>{opportunity.required_score}%</b>
       </div>
     </div>
   )
 }
 
 export default function Opportunities() {
-  const [profile, setProfile] = useState(null)
-  const [loadingProfile, setLoadingProfile] = useState(true)
-  const [profileError, setProfileError] = useState('')
+  const [opportunities, setOpportunities] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const [query, setQuery] = useState('')
   const [type, setType] = useState('All')
@@ -89,55 +88,66 @@ export default function Opportunities() {
   const [minMatch, setMinMatch] = useState('All')
   const [skillTag, setSkillTag] = useState('All')
 
-  useEffect(() => {
-    let cancelled = false
-    async function run() {
-      try {
-        const p = await getProfile()
-        if (!cancelled) setProfile(p)
-      } catch (e) {
-        if (!cancelled) setProfileError(e?.message || 'Failed to load profile')
-      } finally {
-        if (!cancelled) setLoadingProfile(false)
+  const loadOpportunities = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError('')
+      const params = {
+        type_filter: type !== 'All' ? type : null,
+        location_filter: location !== 'All' ? location : null,
+        min_match: minMatch !== 'All' ? Number(minMatch) : null,
+        skill_filter: skillTag !== 'All' ? skillTag : null,
+        search: query || null,
       }
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== ''))
+      const data = await getOpportunities(cleanParams)
+      setOpportunities(data || [])
+    } catch (e) {
+      setError(e?.message || 'Failed to load opportunities')
+    } finally {
+      setLoading(false)
     }
-    run()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  }, [query, type, location, minMatch, skillTag])
 
+  useEffect(() => {
+    loadOpportunities()
+  }, [loadOpportunities])
+
+  // All filtering now performed by backend
   const allSkillTags = useMemo(() => {
     const set = new Set()
-    mockOpportunities.forEach((op) => op.requiredSkills.forEach((s) => set.add(s)))
+    opportunities.forEach((op) => (op.required_skills || []).forEach((s) => set.add(s)))
     return ['All', ...Array.from(set).sort((a, b) => a.localeCompare(b))]
-  }, [])
+  }, [opportunities])
 
   const filtered = useMemo(() => {
-    const q = normalize(query)
+    return opportunities  // Backend handles all filtering
+  }, [opportunities])
 
-    const matchMin = minMatch === 'All' ? -1 : Number(minMatch)
+  if (loading) {
+    return (
+      <div className="page">
+        <div className="loading-state">
+          <div className="spinner" />
+          <p>Loading opportunities…</p>
+        </div>
+      </div>
+    )
+  }
 
-    return mockOpportunities.filter((op) => {
-      if (type !== 'All' && op.type !== type) return false
-
-      if (location !== 'All') {
-        const bucket = getLocationBucket(op.location)
-        if (bucket !== location) return false
-      }
-
-      if (op.matchPct < matchMin) return false
-
-      if (skillTag !== 'All') {
-        if (!op.requiredSkills.some((s) => normalize(s) === normalize(skillTag))) return false
-      }
-
-      if (!q) return true
-
-      const text = [op.title, op.company, op.location, skillMatchText(op)].join(' ')
-      return normalize(text).includes(q)
-    })
-  }, [query, type, location, minMatch, skillTag])
+  if (error) {
+    return (
+      <div className="page">
+        <div className="empty-state">
+          <div className="empty-state-title">Unable to load opportunities</div>
+          <p className="muted">{error}</p>
+          <button className="btn btn-primary" type="button" onClick={loadOpportunities} style={{ marginTop: 16 }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="page">
@@ -145,8 +155,6 @@ export default function Opportunities() {
         <h1>Opportunities</h1>
         <p className="muted">Find roles matched to your verified skills</p>
       </div>
-
-      {profileError ? <div className="card">{profileError}</div> : null}
 
       <div className="card opp-board">
         <div className="opp-filters">
@@ -207,9 +215,7 @@ export default function Opportunities() {
         </div>
 
         <div className="opp-board-head">
-          <div className="muted">
-            {loadingProfile ? 'Loading profile…' : `Showing matches for ${profile?.name ?? 'you'}`}
-          </div>
+          <div className="muted">Available opportunities ({opportunities.length} total)</div>
           <div className="opp-result-count">
             {filtered.length} result{filtered.length === 1 ? '' : 's'}
           </div>
@@ -231,5 +237,3 @@ export default function Opportunities() {
     </div>
   )
 }
-
-

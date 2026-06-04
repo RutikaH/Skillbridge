@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { getProfile } from '../services/authService'
-import { mockSkills } from '../data/mockSkills'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getSkills } from '../services/apiService'
 
 const levelOptions = ['All', 'Beginner', 'Intermediate', 'Advanced', 'Expert']
 
@@ -53,15 +52,22 @@ function SkillCard({ skill }) {
         <div>
           <div className="skill-name">{skill.name}</div>
           <div className="skill-level">
-            {skill.level} · {skill.assessmentCount} assessments
+            {skill.level} · {skill.assessment_count} assessments
           </div>
           <div className="skill-sub-meta">
-            <span className="muted">Last evaluated:</span> {skill.lastEvaluatedDate}
+            <span className="muted">Last evaluated:</span>{' '}
+            {skill.last_evaluated_date
+              ? new Date(skill.last_evaluated_date).toLocaleDateString('en-IN', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+              })
+              : 'Not yet evaluated'}
           </div>
         </div>
         <div className="skill-right">
           <div className="skill-score">
-            {skill.verifiedScore}
+            {skill.verified_score}
             <span className="skill-score-suffix">%</span>
           </div>
           <div style={{ marginTop: 8 }}>
@@ -86,52 +92,69 @@ function SkillCard({ skill }) {
 }
 
 export default function Skills() {
-  const [profile, setProfile] = useState(null)
-  const [loadingProfile, setLoadingProfile] = useState(true)
-  const [profileError, setProfileError] = useState('')
+  const [skills, setSkills] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const [query, setQuery] = useState('')
   const [level, setLevel] = useState('All')
   const [verifiedOnly, setVerifiedOnly] = useState(false)
-  const [sortBy, setSortBy] = useState('score') // score | name
+  const [sortBy, setSortBy] = useState('score')
+
+  const loadSkills = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError('')
+      const params = {
+        level_filter: level !== 'All' ? level : null,
+        verified_only: verifiedOnly || null,
+        sort_by: sortBy,
+        query: query || null,
+      }
+      // Remove null/undefined params
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== ''))
+      const data = await getSkills(cleanParams)
+      setSkills(data.skills || [])
+    } catch (e) {
+      setError(e?.message || 'Failed to load skills')
+    } finally {
+      setLoading(false)
+    }
+  }, [query, level, verifiedOnly, sortBy])
 
   useEffect(() => {
-    let cancelled = false
-    async function run() {
-      try {
-        const p = await getProfile()
-        if (!cancelled) setProfile(p)
-      } catch (e) {
-        if (!cancelled) setProfileError(e?.message || 'Failed to load profile')
-      } finally {
-        if (!cancelled) setLoadingProfile(false)
-      }
-    }
-    run()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    loadSkills()
+  }, [loadSkills])
 
+  // Frontend filtering is now handled by backend; skills already filtered
   const filtered = useMemo(() => {
-    const q = normalize(query)
+    return skills
+  }, [skills])
 
-    let items = [...mockSkills]
+  if (loading) {
+    return (
+      <div className="page">
+        <div className="loading-state">
+          <div className="spinner" />
+          <p>Loading skills…</p>
+        </div>
+      </div>
+    )
+  }
 
-    if (verifiedOnly) items = items.filter((s) => s.verified)
-
-    if (level !== 'All') items = items.filter((s) => s.level === level)
-
-    if (q) items = items.filter((s) => normalize(s.name).includes(q) || normalize(s.level).includes(q))
-
-    items.sort((a, b) => {
-      if (sortBy === 'name') return a.name.localeCompare(b.name)
-      // score desc
-      return b.verifiedScore - a.verifiedScore
-    })
-
-    return items
-  }, [query, level, verifiedOnly, sortBy])
+  if (error) {
+    return (
+      <div className="page">
+        <div className="empty-state">
+          <div className="empty-state-title">Unable to load skills</div>
+          <p className="muted">{error}</p>
+          <button className="btn btn-primary" type="button" onClick={loadSkills} style={{ marginTop: 16 }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="page">
@@ -139,8 +162,6 @@ export default function Skills() {
         <h1>Skills</h1>
         <p className="muted">Search, verify, and track your assessment progress</p>
       </div>
-
-      {profileError ? <div className="card">{profileError}</div> : null}
 
       <div className="card opp-board">
         <div className="skills-controls">
@@ -184,9 +205,7 @@ export default function Skills() {
         </div>
 
         <div className="opp-board-head">
-          <div className="muted">
-            {loadingProfile ? 'Loading profile…' : `Skills for ${profile?.name ?? 'you'}`}
-          </div>
+          <div className="muted">Your skills ({skills.length} total)</div>
           <div className="opp-result-count">
             {filtered.length} result{filtered.length === 1 ? '' : 's'}
           </div>
@@ -195,12 +214,16 @@ export default function Skills() {
         {filtered.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-title">No skills found</div>
-            <div className="muted">Try changing your search or filters.</div>
+            <div className="muted">
+              {skills.length === 0
+                ? 'Complete an assessment to build your skill profile.'
+                : 'Try changing your search or filters.'}
+            </div>
           </div>
         ) : (
           <div className="skills-grid">
             {filtered.map((s) => (
-              <SkillCard key={s.id} skill={s} />
+              <SkillCard key={s.skill_id || s.id} skill={s} />
             ))}
           </div>
         )}
@@ -208,5 +231,3 @@ export default function Skills() {
     </div>
   )
 }
-
-

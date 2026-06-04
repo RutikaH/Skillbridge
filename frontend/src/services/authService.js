@@ -1,4 +1,4 @@
-const API_BASE = ''
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const TOKEN_KEY = 'skillbridge_token'
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY)

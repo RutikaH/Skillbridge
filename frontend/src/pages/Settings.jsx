@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { getProfile } from '../services/authService'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getProfile, getPreferences, updatePreferences } from '../services/apiService'
 
 const LANGUAGES = ['English', 'Hindi', 'Telugu', 'Tamil', 'Spanish']
 const DASHBOARD_LANDING_OPTIONS = ['Dashboard', 'Assessments', 'Opportunities']
@@ -7,7 +7,6 @@ const DASHBOARD_LANDING_OPTIONS = ['Dashboard', 'Assessments', 'Opportunities']
 const LS_KEYS = {
   theme: 'skillbridge_theme',
   notifications: 'skillbridge_notifications',
-  preferences: 'skillbridge_preferences',
 }
 
 function safeJsonParse(value, fallback) {
@@ -17,11 +16,6 @@ function safeJsonParse(value, fallback) {
   } catch {
     return fallback
   }
-}
-
-function formatMemberSince(yearLike) {
-  // deterministic mock until backend provides it
-  return yearLike || '2024'
 }
 
 function ToggleRow({ icon, label, description, checked, onChange }) {
@@ -47,15 +41,6 @@ function ToggleRow({ icon, label, description, checked, onChange }) {
   )
 }
 
-function TextInput({ label, value, onChange, type = 'text', placeholder }) {
-  return (
-    <div className="settings-field">
-      <label className="label">{label}</label>
-      <input className="input" type={type} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
-    </div>
-  )
-}
-
 export default function Settings() {
   const [profile, setProfile] = useState(null)
   const [profileLoading, setProfileLoading] = useState(true)
@@ -72,14 +57,21 @@ export default function Settings() {
     })
   )
 
-  const [preferences, setPreferences] = useState(() =>
-    safeJsonParse(localStorage.getItem(LS_KEYS.preferences), {
-      language: 'English',
-      dashboardLanding: 'Dashboard',
-    })
-  )
+  const [preferences, setPreferences] = useState({
+    preferred_language: 'English',
+    preferred_roles: [],
+    preferred_work_modes: [],
+    preferred_industries: [],
+    preferred_locations: [],
+  })
+  const [preferencesLoading, setPreferencesLoading] = useState(true)
+  const [preferencesSaving, setPreferencesSaving] = useState(false)
+  const [preferencesSaved, setPreferencesSaved] = useState(false)
 
-  const memberSince = useMemo(() => formatMemberSince('2024'), [])
+  const memberSince = useMemo(() => {
+    if (!profile?.user?.created_at) return '2025'
+    return new Date(profile.user.created_at).getFullYear()
+  }, [profile])
 
   useEffect(() => {
     localStorage.setItem(LS_KEYS.theme, theme)
@@ -90,11 +82,7 @@ export default function Settings() {
   }, [notifications])
 
   useEffect(() => {
-    localStorage.setItem(LS_KEYS.preferences, JSON.stringify(preferences))
-  }, [preferences])
-
-  useEffect(() => {
-    ;(document.documentElement || document.body).classList.toggle('theme-dark', theme === 'dark')
+    ; (document.documentElement || document.body).classList.toggle('theme-dark', theme === 'dark')
   }, [theme])
 
   useEffect(() => {
@@ -104,38 +92,60 @@ export default function Settings() {
         setProfileLoading(true)
         const p = await getProfile()
         if (!cancelled) setProfile(p)
+
+        const prefs = await getPreferences()
+        if (!cancelled) {
+          setPreferences({
+            preferred_language: prefs.preferred_language || 'English',
+            preferred_roles: prefs.preferred_roles || [],
+            preferred_work_modes: prefs.preferred_work_modes || [],
+            preferred_industries: prefs.preferred_industries || [],
+            preferred_locations: prefs.preferred_locations || [],
+          })
+        }
       } catch (e) {
         if (!cancelled) setProfileError(e?.message || 'Failed to load profile')
       } finally {
-        if (!cancelled) setProfileLoading(false)
+        if (!cancelled) {
+          setProfileLoading(false)
+          setPreferencesLoading(false)
+        }
       }
     }
     run()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
-  const [security, setSecurity] = useState({
+  const [security] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
   })
 
-  const securityCanSave = useMemo(() => false, []) // no backend endpoint wired
+  const securityCanSave = false
 
-  const updatePref = (patch) => setPreferences((prev) => ({ ...prev, ...patch }))
-
-  const updateNotif = (patch) => setNotifications((prev) => ({ ...prev, ...patch }))
+  const handleSavePreferences = useCallback(async () => {
+    try {
+      setPreferencesSaving(true)
+      setPreferencesSaved(false)
+      await updatePreferences(preferences)
+      setPreferencesSaved(true)
+      setTimeout(() => setPreferencesSaved(false), 3000)
+    } catch (e) {
+      setProfileError(e?.message || 'Failed to save preferences')
+    } finally {
+      setPreferencesSaving(false)
+    }
+  }, [preferences])
 
   return (
     <div className="page settings-page">
       <div className="page-header">
         <h1>Settings</h1>
-        <p className="muted">Account, appearance, notifications, and security (UI only)</p>
+        <p className="muted">Account, appearance, notifications, and preferences</p>
       </div>
 
-      {profileError ? <div className="card">{profileError}</div> : null}
+      {profileError ? <div className="card field-error panel-error">{profileError}</div> : null}
 
       <div className="grid settings-grid">
         {/* Account */}
@@ -150,12 +160,12 @@ export default function Settings() {
           <div className="settings-two-col">
             <div className="settings-field">
               <label className="label">Full Name</label>
-              <div className="settings-readonly">{profile?.name ?? (profileLoading ? 'Loading…' : '—')}</div>
+              <div className="settings-readonly">{profile?.user?.name ?? (profileLoading ? 'Loading…' : '—')}</div>
             </div>
 
             <div className="settings-field">
               <label className="label">Email</label>
-              <div className="settings-readonly">{profile?.email ?? (profileLoading ? 'Loading…' : '—')}</div>
+              <div className="settings-readonly">{profile?.user?.email ?? (profileLoading ? 'Loading…' : '—')}</div>
             </div>
           </div>
 
@@ -217,28 +227,28 @@ export default function Settings() {
               label="Email Notifications"
               description="Get important updates by email"
               checked={notifications.emailNotifications}
-              onChange={(v) => updateNotif({ emailNotifications: v })}
+              onChange={(v) => setNotifications((prev) => ({ ...prev, emailNotifications: v }))}
             />
             <ToggleRow
               icon="🧪"
               label="Assessment Updates"
               description="When new evaluations are ready"
               checked={notifications.assessmentUpdates}
-              onChange={(v) => updateNotif({ assessmentUpdates: v })}
+              onChange={(v) => setNotifications((prev) => ({ ...prev, assessmentUpdates: v }))}
             />
             <ToggleRow
               icon="🎯"
               label="Opportunity Alerts"
               description="New jobs or internships matched to you"
               checked={notifications.opportunityAlerts}
-              onChange={(v) => updateNotif({ opportunityAlerts: v })}
+              onChange={(v) => setNotifications((prev) => ({ ...prev, opportunityAlerts: v }))}
             />
             <ToggleRow
               icon="📣"
               label="Product Announcements"
               description="Beta features and platform news"
               checked={notifications.productAnnouncements}
-              onChange={(v) => updateNotif({ productAnnouncements: v })}
+              onChange={(v) => setNotifications((prev) => ({ ...prev, productAnnouncements: v }))}
             />
           </div>
         </section>
@@ -253,24 +263,36 @@ export default function Settings() {
           </div>
 
           <div className="settings-security-grid">
-            <TextInput
-              label="Current Password"
-              type="password"
-              value={security.currentPassword}
-              onChange={(v) => setSecurity((prev) => ({ ...prev, currentPassword: v }))}
-            />
-            <TextInput
-              label="New Password"
-              type="password"
-              value={security.newPassword}
-              onChange={(v) => setSecurity((prev) => ({ ...prev, newPassword: v }))}
-            />
-            <TextInput
-              label="Confirm Password"
-              type="password"
-              value={security.confirmPassword}
-              onChange={(v) => setSecurity((prev) => ({ ...prev, confirmPassword: v }))}
-            />
+            <div className="settings-field">
+              <label className="label">Current Password</label>
+              <input
+                className="input"
+                type="password"
+                value={security.currentPassword}
+                onChange={() => { }}
+                placeholder="Enter current password"
+              />
+            </div>
+            <div className="settings-field">
+              <label className="label">New Password</label>
+              <input
+                className="input"
+                type="password"
+                value={security.newPassword}
+                onChange={() => { }}
+                placeholder="Enter new password"
+              />
+            </div>
+            <div className="settings-field">
+              <label className="label">Confirm Password</label>
+              <input
+                className="input"
+                type="password"
+                value={security.confirmPassword}
+                onChange={() => { }}
+                placeholder="Confirm new password"
+              />
+            </div>
           </div>
 
           <div className="settings-security-footer">
@@ -281,54 +303,120 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* Preferences */}
+        {/* Preferences - Now Persisted to Backend */}
         <section className="card settings-card" aria-label="Preferences">
           <div className="section-title-row">
             <div>
               <div className="section-title">Preferences</div>
-              <div className="section-subtitle">Frontend-only customization</div>
+              <div className="section-subtitle">Customize your experience (persisted to database)</div>
             </div>
           </div>
 
-          <div className="settings-two-col">
-            <div className="settings-field">
-              <label className="label">Language</label>
-              <select
-                className="select"
-                value={preferences.language}
-                onChange={(e) => updatePref({ language: e.target.value })}
-              >
-                {LANGUAGES.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {preferencesLoading ? (
+            <div className="muted">Loading preferences…</div>
+          ) : (
+            <>
+              <div className="settings-two-col">
+                <div className="settings-field">
+                  <label className="label">Language</label>
+                  <select
+                    className="select"
+                    value={preferences.preferred_language}
+                    onChange={(e) => setPreferences((prev) => ({ ...prev, preferred_language: e.target.value }))}
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="settings-field">
-              <label className="label">Dashboard landing page</label>
-              <select
-                className="select"
-                value={preferences.dashboardLanding}
-                onChange={(e) => updatePref({ dashboardLanding: e.target.value })}
-              >
-                {DASHBOARD_LANDING_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+                <div className="settings-field">
+                  <label className="label">Preferred Roles</label>
+                  <input
+                    className="input"
+                    value={(preferences.preferred_roles || []).join(', ')}
+                    onChange={(e) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        preferred_roles: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                      }))
+                    }
+                    placeholder="e.g. Frontend Developer, Data Analyst"
+                  />
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    Comma-separated list of roles
+                  </div>
+                </div>
+              </div>
 
-          <div className="settings-inline-note">
-            <span aria-hidden>💡</span> Navigation preference persists in localStorage.
-          </div>
+              <div className="settings-two-col" style={{ marginTop: 12 }}>
+                <div className="settings-field">
+                  <label className="label">Work Modes</label>
+                  <input
+                    className="input"
+                    value={(preferences.preferred_work_modes || []).join(', ')}
+                    onChange={(e) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        preferred_work_modes: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                      }))
+                    }
+                    placeholder="e.g. Remote, Hybrid"
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label className="label">Industries</label>
+                  <input
+                    className="input"
+                    value={(preferences.preferred_industries || []).join(', ')}
+                    onChange={(e) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        preferred_industries: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                      }))
+                    }
+                    placeholder="e.g. SaaS, FinTech"
+                  />
+                </div>
+              </div>
+
+              <div className="settings-field" style={{ marginTop: 12 }}>
+                <label className="label">Preferred Locations</label>
+                <input
+                  className="input"
+                  value={(preferences.preferred_locations || []).join(', ')}
+                  onChange={(e) =>
+                    setPreferences((prev) => ({
+                      ...prev,
+                      preferred_locations: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                    }))
+                  }
+                  placeholder="e.g. Bengaluru, Remote (Anywhere)"
+                />
+              </div>
+
+              <div className="settings-security-footer" style={{ marginTop: 16 }}>
+                <div className="muted">
+                  {preferencesSaved
+                    ? '✅ Preferences saved to database successfully.'
+                    : 'Preferences are stored in the database and persist across sessions.'}
+                </div>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={handleSavePreferences}
+                  disabled={preferencesSaving}
+                >
+                  {preferencesSaving ? 'Saving…' : 'Save Preferences'}
+                </button>
+              </div>
+            </>
+          )}
         </section>
       </div>
     </div>
   )
 }
-
-

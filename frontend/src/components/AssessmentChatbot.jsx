@@ -1,6 +1,8 @@
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatBubble from './ChatBubble'
 import { fetchWithAuth, getProfile, logout } from '../services/authService'
+import { saveAssessmentResult, saveOpportunityRecommendation } from '../services/apiService'
 import { useNavigate } from 'react-router-dom'
 
 const languages = ['English', 'Hindi', 'Telugu', 'Tamil', 'Spanish']
@@ -17,6 +19,7 @@ export default function AssessmentChatbot({ className = '' }) {
   const [language, setLanguage] = useState('English')
   const [error, setError] = useState('')
   const [listening, setListening] = useState(false)
+  const [trackedSkill, setTrackedSkill] = useState(null)
 
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -70,6 +73,23 @@ export default function AssessmentChatbot({ className = '' }) {
     const text = input.trim()
     if (!text || loading || !sessionId) return
 
+    // Track the skill name from the user's first substantive message (Step 1)
+    if (!trackedSkill && text.trim().length > 3) {
+      // Try to extract a skill name from the user's first answer
+      const skillHints = [
+        'python', 'javascript', 'typescript', 'react', 'node', 'java',
+        'html', 'css', 'sql', 'c++', 'go', 'rust', 'django', 'fastapi',
+        'flask', 'data analysis', 'machine learning', 'git', 'docker',
+        'aws', 'kubernetes', 'api', 'testing', 'ui/ux', 'problem solving',
+      ]
+      const lower = text.toLowerCase()
+      const matched = skillHints.find((s) => lower.includes(s))
+      if (matched) {
+        // Capitalize first letter
+        setTrackedSkill(matched.charAt(0).toUpperCase() + matched.slice(1))
+      }
+    }
+
     setInput('')
     setMessages((prev) => [
       ...prev,
@@ -109,6 +129,46 @@ export default function AssessmentChatbot({ className = '' }) {
             jsonData: m.json_data ?? null,
           })
         })
+      }
+
+      // Persist assessment results and job recommendations to the database
+      for (const msg of newMessages) {
+        if (msg.jsonData && typeof msg.jsonData === 'object') {
+          // Step 3 evaluation: { score, strengths, improvements }
+          if (typeof msg.jsonData.score === 'number') {
+            const score10 = msg.jsonData.score
+            const score100 = Math.min(100, score10 * 10)
+            try {
+              await saveAssessmentResult(
+                `AI Skill Assessment — ${trackedSkill || 'General'}`,
+                score100,
+                trackedSkill,
+                msg.jsonData.strengths || [],
+                msg.jsonData.improvements || [],
+                'Verified'
+              )
+            } catch (saveErr) {
+              console.error('Failed to save assessment result:', saveErr)
+            }
+          }
+
+          // Step 7 job matches: [{ role, reason, skills_matched, search_link }]
+          if (Array.isArray(msg.jsonData) && msg.jsonData.length > 0 && msg.jsonData[0].role) {
+            for (const job of msg.jsonData) {
+              try {
+                await saveOpportunityRecommendation(
+                  job.role,
+                  job.reason,
+                  job.skills_matched || [],
+                  job.search_link,
+                  trackedSkill
+                )
+              } catch (saveErr) {
+                console.error('Failed to save job recommendation:', saveErr)
+              }
+            }
+          }
+        }
       }
 
       setMessages((prev) => [...prev, ...newMessages])

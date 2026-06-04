@@ -1,39 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getProfile } from '../services/authService'
-
-const skillsMock = [
-  { name: 'Python', score: 82, level: 'Advanced' },
-  { name: 'React', score: 68, level: 'Intermediate' },
-  { name: 'SQL', score: 61, level: 'Intermediate' },
-]
-
-const activityMock = [
-  { title: 'Assessment submitted', detail: 'Skill Test — Python', date: 'Today' },
-  { title: 'Evaluation completed', detail: 'Verified score posted to your profile', date: 'Yesterday' },
-  { title: 'New skill unlocked', detail: 'React — Intermediate level', date: '2 days ago' },
-]
-
-const opportunitiesMock = [
-  {
-    role: 'Frontend Intern',
-    company: 'NovaWorks',
-    type: 'Internship',
-    location: 'Bengaluru',
-    requiredSkills: 'React, JavaScript',
-    matchPct: 86,
-    description: 'Build UI features and collaborate with the design + engineering teams.',
-  },
-  {
-    role: 'Data Analyst (Entry)',
-    company: 'Pulse Analytics',
-    type: 'Job',
-    location: 'Remote',
-    requiredSkills: 'SQL, Python',
-    matchPct: 79,
-    description: 'Turn raw data into actionable insights and dashboards.',
-  },
-]
+import { getDashboard } from '../services/apiService'
 
 function levelToProgress(level) {
   switch (level) {
@@ -108,13 +75,17 @@ function SkillProgressCard({ name, score, level }) {
 }
 
 function ActivityItem({ title, detail, date }) {
+  const displayDate = date
+    ? new Date(date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
+    : 'Recently'
+
   return (
     <div className="activity-item">
       <div className="activity-dot" aria-hidden />
       <div className="activity-content">
         <div className="activity-title">{title}</div>
         <div className="activity-detail">{detail}</div>
-        <div className="activity-date">{date}</div>
+        <div className="activity-date">{displayDate}</div>
       </div>
     </div>
   )
@@ -151,36 +122,34 @@ function OpportunityCard({ role, company, location, requiredSkills, matchPct, de
 export default function Dashboard() {
   const navigate = useNavigate()
 
-  const [profile, setProfile] = useState(null)
-  const [loadingProfile, setLoadingProfile] = useState(true)
-  const [profileError, setProfileError] = useState('')
+  const [dashboardData, setDashboardData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const userName = useMemo(() => profile?.name, [profile])
-  const avatarInitials = useMemo(() => initials(userName), [userName])
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      try {
-        setLoadingProfile(true)
-        setProfileError('')
-        const p = await getProfile()
-        if (!cancelled) setProfile(p)
-      } catch (e) {
-        if (!cancelled) setProfileError(e?.message || 'Unable to load profile')
-      } finally {
-        if (!cancelled) setLoadingProfile(false)
-      }
-    }
-
-    load()
-    return () => {
-      cancelled = true
+  const loadDashboard = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError('')
+      const data = await getDashboard()
+      setDashboardData(data)
+    } catch (e) {
+      setError(e?.message || 'Unable to load dashboard data')
+    } finally {
+      setLoading(false)
     }
   }, [])
 
-  const welcomeLine = loadingProfile
+  useEffect(() => {
+    loadDashboard()
+  }, [loadDashboard])
+
+  const userName = useMemo(() => dashboardData?.user?.name, [dashboardData])
+  const avatarInitials = useMemo(() => initials(userName), [userName])
+  const skills = useMemo(() => dashboardData?.skills || [], [dashboardData])
+  const activities = useMemo(() => dashboardData?.recent_activities || [], [dashboardData])
+  const opportunities = useMemo(() => dashboardData?.top_opportunities || [], [dashboardData])
+
+  const welcomeLine = loading
     ? 'Welcome back…'
     : userName
       ? `Welcome back, ${userName} 👋`
@@ -188,13 +157,58 @@ export default function Dashboard() {
 
   const kpis = useMemo(
     () => [
-      { icon: '✅', label: 'Verified Skills', value: '3', sublabel: 'Ready to prove' },
-      { icon: '📈', label: 'Average Skill Score', value: '70%', sublabel: 'Across assessments' },
-      { icon: '🧪', label: 'Assessments Completed', value: '4', sublabel: 'Latest evaluated' },
-      { icon: '🎯', label: 'Opportunity Matches', value: '5', sublabel: 'Based on scores' },
+      {
+        icon: '✅',
+        label: 'Verified Skills',
+        value: dashboardData?.verified_skills_count?.toString() || '0',
+        sublabel: 'Ready to prove',
+      },
+      {
+        icon: '📈',
+        label: 'Average Skill Score',
+        value: dashboardData?.overall_skill_score ? `${dashboardData.overall_skill_score}%` : '0%',
+        sublabel: 'Across assessments',
+      },
+      {
+        icon: '🧪',
+        label: 'Assessments Completed',
+        value: dashboardData?.assessments_completed?.toString() || '0',
+        sublabel: 'Latest evaluated',
+      },
+      {
+        icon: '🎯',
+        label: 'Opportunity Matches',
+        value: dashboardData?.opportunity_matches?.toString() || '0',
+        sublabel: 'Based on scores',
+      },
     ],
-    []
+    [dashboardData]
   )
+
+  if (loading) {
+    return (
+      <div className="page">
+        <div className="loading-state">
+          <div className="spinner" />
+          <p>Loading dashboard…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="page">
+        <div className="empty-state">
+          <div className="empty-state-title">Unable to load dashboard</div>
+          <p className="muted">{error}</p>
+          <button className="btn btn-primary" type="button" onClick={loadDashboard} style={{ marginTop: 16 }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="page">
@@ -220,8 +234,6 @@ export default function Dashboard() {
               <div className="hero-progress-l">Opportunity matches</div>
             </div>
           </div>
-
-          {profileError ? <div className="field-error panel-error hero-error">{profileError}</div> : null}
 
           <div className="hero-actions">
             <button className="btn btn-primary" type="button" onClick={() => navigate('/assessments')}>
@@ -271,11 +283,21 @@ export default function Dashboard() {
           </button>
         </div>
 
-        <div className="skills-grid">
-          {skillsMock.map((s) => (
-            <SkillProgressCard key={s.name} name={s.name} score={s.score} level={s.level} />
-          ))}
-        </div>
+        {skills.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-title">No skills yet</div>
+            <p className="muted">Complete an assessment to get your first verified skill.</p>
+            <button className="btn btn-primary" type="button" onClick={() => navigate('/assessments')} style={{ marginTop: 12 }}>
+              Start Assessment
+            </button>
+          </div>
+        ) : (
+          <div className="skills-grid">
+            {skills.map((s) => (
+              <SkillProgressCard key={s.skill_id} name={s.name} score={s.verified_score} level={s.level} />
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="section">
@@ -286,11 +308,18 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="activity-list">
-          {activityMock.map((a) => (
-            <ActivityItem key={a.title + a.detail} title={a.title} detail={a.detail} date={a.date} />
-          ))}
-        </div>
+        {activities.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-title">No recent activity</div>
+            <p className="muted">Your activity will appear here as you complete assessments.</p>
+          </div>
+        ) : (
+          <div className="activity-list">
+            {activities.map((a) => (
+              <ActivityItem key={a.id} title={a.title} detail={a.detail} date={a.created_at} />
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="section">
@@ -304,22 +333,27 @@ export default function Dashboard() {
           </button>
         </div>
 
-        <div className="opps-grid">
-          {opportunitiesMock.map((o) => (
-            <OpportunityCard
-              key={o.role + o.company}
-              role={o.role}
-              company={o.company}
-              location={o.location}
-              requiredSkills={o.requiredSkills}
-              matchPct={o.matchPct}
-              description={o.description}
-            />
-          ))}
-        </div>
+        {opportunities.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-title">No opportunities yet</div>
+            <p className="muted">Complete assessments to unlock matching opportunities.</p>
+          </div>
+        ) : (
+          <div className="opps-grid">
+            {opportunities.map((o) => (
+              <OpportunityCard
+                key={o.id}
+                role={o.title}
+                company={o.company}
+                location={o.location}
+                requiredSkills={o.required_skills?.join(', ')}
+                matchPct={o.match_pct}
+                description={o.description}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
 }
-
-

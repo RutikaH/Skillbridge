@@ -1,153 +1,145 @@
 # SkillBridge AI
 
-> **Hackathon demo** — zero to job-ready in under 4 minutes.  
+> **Hackathon project** — go from zero to job-ready.
 > No resume needed. Just show up and type.
 
-## What it does
+---
 
-A single AI agent guides a user through a strict 7-step flow:
+## Project Overview
 
-| Step | What happens |
-|------|-------------|
-| 1 | 3 onboarding questions (opportunity, skills, language) |
-| 2 | One practical skill test task |
-| 3 | JSON evaluation with score + feedback |
-| 4 | 2 tailored beginner projects |
-| 5 | Guided build of Step 1 |
-| 6 | Show-your-work summary |
-| 7 | Job/internship matches |
+SkillBridge replaces the resume-first hiring bottleneck with a **skills-first assessment engine**. Instead of judging candidates by degrees or work history, it evaluates their actual abilities through an AI-powered conversational interview.
 
-## Tech stack
+**How it works:**
+1. User signs up / logs in (email or Google)
+2. AI chatbot asks 3 onboarding questions (target opportunity, known skills, language)
+3. User completes a practical coding/logic/skill task
+4. AI evaluates the answer and assigns a **verified skill score** (0–100)
+5. Platform shows 2 tailored beginner projects to build
+6. AI generates a build summary + **personalized job/internship matches**
+7. All results are saved to a **skill passport** (profile) that proves capability
 
-- **Frontend** — React 18 + Vite (chat UI)
-- **Backend** — FastAPI + Python
-- **AI** — OpenAI GPT-4o (primary) with Groq Llama 3.1 8B Instant (fallback).
-  The service can also run in **Groq-only** mode with no OpenAI dependency.
+**Target users:** students, career changers, and entry-level candidates who want to validate their skills, build practical projects, and discover matching opportunities.
 
-## LLM provider modes
+---
 
-The backend (`backend/llm_router.py`) picks a provider based on the
-environment variables you set:
+## Key Features
 
-| `OPENAI_API_KEY` | `GROQ_API_KEY` | Behaviour |
-|------------------|----------------|-----------|
-| ✅ set           | ✅ set          | OpenAI (GPT-4o) is primary, Groq is the automatic runtime fallback |
-| ❌ empty         | ✅ set          | **Groq-only mode** — OpenAI is skipped entirely, Groq is the only provider |
-| ✅ set           | ❌ empty        | OpenAI only (no fallback — model calls will fail if OpenAI errors) |
-| ❌ empty         | ❌ empty        | App starts, but model calls return a clear runtime error |
+| Feature | Description |
+|---------|-------------|
+| **AI Assessment Chatbot** | 7-step guided conversation with real-time evaluation |
+| **Skill Verification** | Scores (0–100) mapped to levels: Beginner → Expert |
+| **Job Matching** | Curated internships and entry-level roles |
+| **Google OAuth** | One-click signup alongside email/password |
+| **JWT Auth** | Secure, token-based sessions |
+| **Dark Theme UI** | Full React chat interface with markdown rendering |
 
-> **Cheapest / simplest deployment:** set `GROQ_API_KEY` only and leave
-> `OPENAI_API_KEY` empty. The app will start normally and run entirely
-> on Groq.
+---
 
-Check which mode is active at runtime:
+## Tech Stack
 
-```bash
-curl http://localhost:8000/health
-# { "status": "ok", "llm": { "openai_configured": false, "groq_configured": true, "active_provider": "Groq only" } }
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | React 18 + Vite 5, React Router 6, Framer Motion |
+| **Backend** | FastAPI (Python), Uvicorn |
+| **AI / LLM** | OpenAI GPT-4o (primary) + Groq Llama 3.1 8B Instant (fallback) |
+| **Database** | SQLite (SQLAlchemy ORM) |
+| **Auth** | JWT (HS256) + Argon2 password hashing |
+| **Deployment** | Render Blueprint (backend + static frontend) |
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│          React Frontend (Vite SPA)           │
+│  /login  /signup  /dashboard  /skills       │
+│  /assessments  /opportunities  /profile     │
+└─────────────────────┬───────────────────────┘
+                      │  fetch() + Bearer JWT
+                      ▼
+┌─────────────────────────────────────────────┐
+│       FastAPI Backend (Uvicorn)              │
+│  /auth/*   /api/*   /start   /chat   /health│
+└─────────────────────┬───────────────────────┘
+                      │  SQLAlchemy ORM
+                      ▼
+┌─────────────────────────────────────────────┐
+│         SQLite Database                       │
+│  users  ·  skills  ·  user_skills           │
+│  assessment_results  ·  opportunities       │
+└─────────────────────────────────────────────┘
+                      ▲
+                      │  OpenAI / Groq API
+                ┌─────┴─────┐
+                │ LLM Router│
+                └───────────┘
 ```
 
-## Setup
+---
 
-### 1. Get an LLM API key
 
-Pick **one** of the two:
+---
 
-- **Groq (recommended for low cost / free tier):** <https://console.groq.com/keys>
-- **OpenAI:** <https://platform.openai.com/api-keys>
+## Setup Instructions
 
-> If you supply **both** keys, OpenAI is used as the primary model and
-> Groq becomes the automatic fallback.
+### Prerequisites
 
-### 2. Backend
+- Python 3.11+
+- Node.js 18+
+- A **Groq API key** (free tier) or OpenAI key
+
+> **Cheapest path:** Use Groq only (leave `OPENAI_API_KEY` empty).
+
+### 1. Backend
 
 ```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-cp .env.example .env
-# Edit .env and paste your GROQ_API_KEY (recommended) or OPENAI_API_KEY
-# For a Groq-only deployment, leave OPENAI_API_KEY empty.
-
-uvicorn main:app --reload
-# Runs on http://localhost:8000
+cp .env.example .env             # Add your GROQ_API_KEY
+uvicorn main:app --reload        # http://localhost:8000
 ```
 
-On startup you should see a banner like:
-
-```
-================================================================
-[llm_router] LLM provider status
-[llm_router]   OPENAI_API_KEY: disabled
-[llm_router]   GROQ_API_KEY : ENABLED
-[llm_router]   Mode         : Groq only (no OpenAI dependency)
-================================================================
-```
-
-### 3. Frontend
+### 2. Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev
-# Runs on http://localhost:3000
+npm run dev                      # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — done.
+---
 
-## Project structure
+## Deployment
 
-```
-SkillBridge/
-├── backend/
-│   ├── agent.py          # SkillBridge AI agent (7-step workflow)
-│   ├── llm_router.py     # LLM provider router (OpenAI + Groq, with Groq-only mode)
-│   ├── main.py           # FastAPI endpoints (/start, /chat, /health)
-│   ├── requirements.txt
-│   └── .env.example
-└── frontend/
-    ├── src/
-    │   ├── App.jsx        # Chat shell + session management
-    │   ├── App.css        # Dark theme
-    │   └── components/
-    │       ├── ChatBubble.jsx  # Message renderer (text + markdown)
-    │       └── JsonCard.jsx    # Typed cards for eval/projects/jobs
-    ├── package.json
-    └── vite.config.js
-```
+Deployed via **Render Blueprint** (`render.yaml`):
 
-## API
+- **Backend** — Python web service on Render, auto-installs dependencies and starts with Uvicorn.
+- **Frontend** — Static site built with Vite and published from `dist/`.
+- **Env vars** — JWT secret is auto-generated on deploy; LLM keys, CORS origins, and frontend URL are set manually in the Render dashboard.
+- **Optional persistent disk** — Add a 1 GB disk to `/data` for SQLite persistence across redeploys.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/start` | Create session → returns `session_id` + opening message |
-| POST | `/chat` | `{ session_id, message }` → `{ message, json_data, session_id }` |
-| GET | `/health` | Liveness + active LLM provider info |
+One-click deploy: push this repo to GitHub and connect it on Render as a Blueprint.
 
-## Deployment (Render / Railway / Fly / etc.)
+---
 
-The only **required** environment variables for the backend are:
+## Future Improvements
 
-| Variable | Required | Notes |
-|----------|----------|-------|
-| `JWT_SECRET_KEY` | **yes** | Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `DATABASE_URL` | recommended | Defaults to local SQLite if unset |
-| `CORS_ORIGINS` | recommended | Comma-separated list of allowed frontend origins |
-| `FRONTEND_URL` | recommended | Public URL of the frontend |
-| `GROQ_API_KEY` | **yes (for AI)** | Get a key at <https://console.groq.com/keys> |
-| `OPENAI_API_KEY` | optional | Leave empty for a Groq-only deployment |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | optional | Only if you want Google OAuth |
+| Area | Next Steps |
+|------|-----------|
+| **Matching engine** | Compute dynamic skill-to-opportunity matches instead of static percentages. |
+| **LLM persistence** | Move assessment sessions from in-memory to Redis / DB for restart safety. |
+| **Analytics** | Add time-series tracking of skill growth and assessment streaks. |
+| **Resume export** | Generate a SkillBridge "skill passport" PDF from profile data. |
 
-See `render.yaml` for a working Render blueprint.
 
-## Demo flow (3–4 min)
+---
 
-1. User opens the app — AI asks 3 questions
-2. User types something like: *"I want a job, I know a bit of Python, English"*
-3. AI gives a task: *"Write a function to reverse a string"*
-4. User writes a rough answer
-5. AI evaluates → shows JSON score card
-6. AI shows 2 projects → user picks one step to attempt
-7. AI generates build summary + job matches
+## Live Demo
+
+🌐 Frontend: https://skillbridge-1-hgu8.onrender.com
+
+---
+
